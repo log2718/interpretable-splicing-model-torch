@@ -305,8 +305,8 @@ class PNASModel(nn.Module):
 
         Args:
             x_seq: Sequence tensor of shape ``(batch_size, 4, input_length)``.
-            x_struct: Structure tensor of shape ``(batch_size, 2, input_length)``.
-            x_wobble: Wobble tensor of shape ``(batch_size, 2, input_length)``.
+            x_struct: Structure tensor of shape ``(batch_size, 3, input_length)``.
+            x_wobble: Wobble tensor of shape ``(batch_size, 1, input_length)``.
 
         Returns:
             Tensor containing sigmoid-transformed predictions for each example.

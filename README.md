@@ -27,8 +27,8 @@ Flanking is always required. The helper `utils.add_flanking()` prepends and appe
 `PNASModel.forward()` expects three tensors with a shared sequence length:
 
 - `x_seq`: shape `(batch_size, 4, input_length)` for one-hot nucleotide channels `A/C/G/T`
-- `x_struct`: shape `(batch_size, 2, input_length)` for structure-derived channels, if available
-- `x_wobble`: shape `(batch_size, 2, input_length)` for wobble-derived channels, if available
+- `x_struct`: shape `(batch_size, 3, input_length)` for structure-derived channels, if available
+- `x_wobble`: shape `(batch_size, 1, input_length)` for wobble-derived channels, if available
 
 The forward pass returns sigmoid-transformed predictions. Note that the current implementation uses `squeeze()`, so a batch of size `1` is returned as a scalar.
 
