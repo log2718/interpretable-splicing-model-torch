@@ -45,8 +45,8 @@ seqs = add_flanking(core_exons)
 
 # one_hot_batch returns (N, L, 4); transpose to channel-first for PyTorch.
 x_seq = torch.tensor(one_hot_batch(seqs), dtype=torch.float32).permute(0, 2, 1)
-x_struct = torch.zeros((x_seq.shape[0], 2, x_seq.shape[-1]), dtype=torch.float32)
-x_wobble = torch.zeros((x_seq.shape[0], 2, x_seq.shape[-1]), dtype=torch.float32)
+x_struct = torch.zeros((x_seq.shape[0], 3, x_seq.shape[-1]), dtype=torch.float32)
+x_wobble = torch.zeros((x_seq.shape[0], 1, x_seq.shape[-1]), dtype=torch.float32)
 
 model = PNASModel(input_length=x_seq.shape[-1])
 state_dict = torch.load("model_weights.pt", map_location="cpu")
