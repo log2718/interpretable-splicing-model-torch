@@ -94,11 +94,7 @@ Initialize `PNASModel` with an `input_length` that matches the prepared sequence
 
 ```python
 import torch
-
 from model import PNASModel
-from utils import dataframe_to_dataset
-
-dataset = dataframe_to_dataset(...)
 
 x_seq = torch.tensor(dataset["seq_oh"], dtype=torch.float32)
 x_struct = torch.tensor(dataset["struct_oh"], dtype=torch.float32)
