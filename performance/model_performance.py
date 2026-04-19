@@ -1,8 +1,11 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 
-df = pd.read_csv("data/test_data.csv")
+BASE_DIR = Path(__file__).resolve().parent.parent
+csv_path = BASE_DIR / "data" / "test_data.csv"
+df = pd.read_csv(csv_path)
 df = df[["PSI", "predicted_PSI", "predicted_mfe"]].copy()
 #print(df.info())
 
@@ -38,4 +41,6 @@ ax.set_xticks(range(1, 21))
 ax.grid(True, alpha=0.25)
 
 plt.tight_layout()
+save_path = Path(__file__).resolve().parent / "mfe_bin_loss.png"
+plt.savefig(save_path, dpi=300, bbox_inches="tight")
 plt.show()
