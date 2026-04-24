@@ -1,0 +1,296 @@
+{
+  "low": {
+    "low": [
+      {
+        "predicted_mfe": -20.8,
+        "kl": 0.0070146720298706,
+        "exon": "CCACCGTTTAGCTCCACGTATCCTGCGTTCAACAGATTAAAACAAACTTTCTGCATCGTTGCGGTGGTCC",
+        "predicted_ss": "((.((.((..(((((((..(((...(((((...)))))....((((.............))))....))))))))))..)).))..))..",
+        "freq_MFE": 0.116096,
+        "ensemble_diversity": 5.39,
+        "PSI": 0.5330739299610895,
+        "predicted_PSI": 0.5916527
+      },
+      {
+        "predicted_mfe": -19.1,
+        "kl": 0.0070126261787833,
+        "exon": "CCACTGGAAAGACCTTAAGGACTCTCTATTCCCATCCAGTCTCTTGTACCCGGAAAACCATCCAACGCCT",
+        "predicted_ss": "..(((((......))))).((((((((((((((..............)))).)))).....(((......)))........))))))...",
+        "freq_MFE": 0.159632,
+        "ensemble_diversity": 11.54,
+        "PSI": 0.9904153354632588,
+        "predicted_PSI": 0.9739621
+      },
+      {
+        "predicted_mfe": -22.1,
+        "kl": 0.0070057651151343,
+        "exon": "AGGTCTTCAAGAACGCATGCCGCTTGTCCTCATAAATGTGGGACCACAAGCTCATTTGGTTCTGCAACGA",
+        "predicted_ss": "....((((....(((....(((((.((....((((((.(((((....)))))...)))))).....))))))).....)))...))))..",
+        "freq_MFE": 0.0289222,
+        "ensemble_diversity": 11.8,
+        "PSI": 0.9466666666666668,
+        "predicted_PSI": 0.91585386
+      }
+    ],
+    "mid": [
+      {
+        "predicted_mfe": -22.6,
+        "kl": 0.0532909807075194,
+        "exon": "CGAAAGATCGCCCGGTCCGATAATGCCACCATTATCTAAACAAGGTCGTACCAATTTGTGGATGCGGACT",
+        "predicted_ss": "(((((((((.(((..((((....)))).(((((((....))))))).........))).)))......))))))(((((....)))))..",
+        "freq_MFE": 0.11531,
+        "ensemble_diversity": 11.9,
+        "PSI": 1.0,
+        "predicted_PSI": 0.9480928
+      },
+      {
+        "predicted_mfe": -22.1,
+        "kl": 0.0532607989110155,
+        "exon": "AGGGCGCGACCAACCAAGCGGGTTGTGACCTGCTCCCAAATTGAATTTGGCAAAAGACTACATAACCCCA",
+        "predicted_ss": "......((((.((......)))))).(((((((....))))))).((((((...))))))....(((((.............)))))...",
+        "freq_MFE": 0.0930636,
+        "ensemble_diversity": 23.69,
+        "PSI": 0.1696428571428571,
+        "predicted_PSI": 0.07187185
+      },
+      {
+        "predicted_mfe": -18.8,
+        "kl": 0.0532507704090994,
+        "exon": "CACCGTATTTTCCACCATAGCCCCGACCTGTTTAAACGTCGCTATCACAATCCAACGATGAACTTGGTTT",
+        "predicted_ss": "...(((((((((.(((..........(((((...(((.(......).)))))))).........))).))))))))).............",
+        "freq_MFE": 0.120977,
+        "ensemble_diversity": 5.2,
+        "PSI": 0.9135802469135802,
+        "predicted_PSI": 0.7937867
+      }
+    ],
+    "high": [
+      {
+        "predicted_mfe": -32.7,
+        "kl": 3.724001366075446,
+        "exon": "CTAGGGCTTCCGATCGAGGCCCGAACTCCGACCAAGTTCGGTGCCGCTCACGACGGCTTGTCCGTTCGAG",
+        "predicted_ss": "..((..(((((..(((((((.....))))))))))))..))......((((.(((((((..(((((.....))))).)))).))))))).",
+        "freq_MFE": 0.111972,
+        "ensemble_diversity": 11.07,
+        "PSI": 0.0086206896551724,
+        "predicted_PSI": 0.9777671
+      },
+      {
+        "predicted_mfe": -33.5,
+        "kl": 3.720844746733903,
+        "exon": "CTGAGTTACACTTGCATGGGCTGGCCGTCAATGACGCACGTGCTCACCGCGAATCTGTGGCCAGTCCATC",
+        "predicted_ss": "....(((...))).((((.(((((.((((((((((((.((....(((...........)))....)))))))))))))).))))).))))",
+        "freq_MFE": 0.0997101,
+        "ensemble_diversity": 8.07,
+        "PSI": 0.0123456790123456,
+        "predicted_PSI": 0.97838646
+      },
+      {
+        "predicted_mfe": -19.7,
+        "kl": 3.443912756987227,
+        "exon": "CATGCCTGGCTCTGGTAACATATAACCGCGCAATGCGGAAGAACATGGGACTGCGAACACGTGCTAAAAA",
+        "predicted_ss": "...((((((....)))))).((((((..(((....((((.....))))......)))..)))).))..((.((.......)).)).....",
+        "freq_MFE": 0.0233302,
+        "ensemble_diversity": 17.38,
+        "PSI": 0.0416666666666666,
+        "predicted_PSI": 0.97702557
+      }
+    ]
+  },
+  "mid": {
+    "low": [
+      {
+        "predicted_mfe": -15.4,
+        "kl": 0.0070146065434306,
+        "exon": "CTCCATGGATCGCTTCCACCTATAATAAGAAACCGGATACGTTTCTGTGACACAATACAGGAAAAATGCT",
+        "predicted_ss": ".(((((((....)).))))).....................(((.((....((((((((......))))))))......)).))).....",
+        "freq_MFE": 0.0234727,
+        "ensemble_diversity": 19.85,
+        "PSI": 0.9911111111111112,
+        "predicted_PSI": 0.9750562
+      },
+      {
+        "predicted_mfe": -14.0,
+        "kl": 0.0070133545539414,
+        "exon": "ATATTATCTCTCTTATCTCAAGATAGCCTTAAGCGGCTGAGTTGCCAGACGGTAAAGAAAGTTCGTCCCT",
+        "predicted_ss": ".....((((......)))).((((.....)))).((((......))))((.(((...(((((..........)))))...))).))....",
+        "freq_MFE": 0.0105068,
+        "ensemble_diversity": 32.03,
+        "PSI": 0.005050505050505,
+        "predicted_PSI": 0.018539285
+      },
+      {
+        "predicted_mfe": -14.0,
+        "kl": 0.0070073087131249,
+        "exon": "ACTTTATGGACACGTTTGTACTACAGAAACCACTACAGTAAGGCTAACCTCCTTATTGAAAACTTAGGTA",
+        "predicted_ss": "..((((..........))))((..((((((((..((.........((((((((.......))))))))....))..))))))))..))..",
+        "freq_MFE": 0.0211261,
+        "ensemble_diversity": 19.76,
+        "PSI": 0.0,
+        "predicted_PSI": 0.0069926055
+      }
+    ],
+    "mid": [
+      {
+        "predicted_mfe": -17.9,
+        "kl": 0.0532698035036119,
+        "exon": "TATATCTTATAAGATTAGCACGCTGTATCCGATCTTACACCGGCTTAGTGGTAGAAACGATCTTGGATAC",
+        "predicted_ss": ".....((((....)))).......((((.((.((((((((((((((.(((((......)))).).)).))))..))))).))))))))).",
+        "freq_MFE": 0.0159871,
+        "ensemble_diversity": 24.87,
+        "PSI": 0.0114285714285714,
+        "predicted_PSI": 0.08473418
+      },
+      {
+        "predicted_mfe": -17.7,
+        "kl": 0.0532138923804777,
+        "exon": "TACTTGACCTAGCCACGCGCAACCCCACCGCTACGTCACACTCCGGAGAAGCCTAAACTGTATAGCAGGA",
+        "predicted_ss": "..(((.((......((((.((((................)))).))))....)))))...((((...((((...))))...)))).....",
+        "freq_MFE": 0.0959319,
+        "ensemble_diversity": 5.75,
+        "PSI": 0.9836065573770492,
+        "predicted_PSI": 0.90489995
+      },
+      {
+        "predicted_mfe": -15.9,
+        "kl": 0.0531805394192614,
+        "exon": "CCAGTCGGCTATCGTCCTCAACTCACCAGTCTCAATATGCCAGCTGACAGGCTCCGCTTAGTTACTCACA",
+        "predicted_ss": "......((..((.(((((((..(((.....(((....)))......)))..))))))).))..))..((((..(((......))))))).",
+        "freq_MFE": 0.0778356,
+        "ensemble_diversity": 9.68,
+        "PSI": 0.9928571428571428,
+        "predicted_PSI": 0.9253184
+      }
+    ],
+    "high": [
+      {
+        "predicted_mfe": -15.8,
+        "kl": 2.87314893718391,
+        "exon": "TCCCGAAGGGCGTAAAAGGTACCCTGGCTTCAAGCCGCCAAAAGATCAGATACAAAGAGAATAATGTGCT",
+        "predicted_ss": "......(((((...(..(((.(((.....))))))..)...)))))......(((((.((((((..........)))).)).)))))...",
+        "freq_MFE": 0.0278185,
+        "ensemble_diversity": 27.05,
+        "PSI": 0.0042016806722689,
+        "predicted_PSI": 0.9456514
+      },
+      {
+        "predicted_mfe": -17.5,
+        "kl": 2.574061296565175,
+        "exon": "TAATCTAAACAGCCCTTCACGTACCGTTCTCGCAGATCGCTGTTGGACATACAATCCCCTTTTAGGGGCA",
+        "predicted_ss": "...................(((.(((....(((..((((..((((....)))).)))).)))...(((((...)))))...))).)))..",
+        "freq_MFE": 0.0609289,
+        "ensemble_diversity": 23.84,
+        "PSI": 0.6989795918367347,
+        "predicted_PSI": 0.010533349
+      },
+      {
+        "predicted_mfe": -17.6,
+        "kl": 2.555521116033387,
+        "exon": "ATGATGTCCTCCTGGCAACTACTAGAATGGAGACCGCGCATAGGTCCAACATAGCCCCCTAGCAGTTATT",
+        "predicted_ss": "......(((((((.(((((..((((......))))...)))((((.......)))))).)))))))......(((..........)))..",
+        "freq_MFE": 0.0455232,
+        "ensemble_diversity": 25.99,
+        "PSI": 0.9683544303797468,
+        "predicted_PSI": 0.06191756
+      }
+    ]
+  },
+  "high": {
+    "low": [
+      {
+        "predicted_mfe": -9.3,
+        "kl": 0.0070194638577452,
+        "exon": "AGCAATTGTCCCCATAAAGTATGCGAACCGAACGCATCCTCCATCCATTAAAACTCAAAAAAAATCAGCG",
+        "predicted_ss": "......((((.((((((..........))).))).))))...................................(((((....).)))).",
+        "freq_MFE": 0.111971,
+        "ensemble_diversity": 12.56,
+        "PSI": 0.0,
+        "predicted_PSI": 0.0070046773
+      },
+      {
+        "predicted_mfe": -12.4,
+        "kl": 0.0070164627622611,
+        "exon": "TAGCCCCAATTCCGATACTGAAACGGGCCGACCCTTAATGATCACCGACACGTATAGTTATTACACCCTC",
+        "predicted_ss": "(((..(((.((.((((...(((.......)))..)))).)).)))..)))....................(((.(((.....))).))).",
+        "freq_MFE": 0.0132889,
+        "ensemble_diversity": 19.23,
+        "PSI": 0.0952380952380952,
+        "predicted_PSI": 0.13375907
+      },
+      {
+        "predicted_mfe": -10.9,
+        "kl": 0.0070114396245967,
+        "exon": "TGCCTCGACATCTTCTACACCCACGTAACTAAAGTCAGCTGTATCCGTACAACCCACTCACCGGAACCGT",
+        "predicted_ss": "..((.(((....))).)).......(((......)))......((((((((..((((..............)))).....)))..)))))",
+        "freq_MFE": 0.0233242,
+        "ensemble_diversity": 26.36,
+        "PSI": 0.9894736842105264,
+        "predicted_PSI": 0.9725016
+      }
+    ],
+    "mid": [
+      {
+        "predicted_mfe": -10.9,
+        "kl": 0.0532641023613873,
+        "exon": "TTCACTTCTGATCCTACAGAAATACATGTTTCACAGATAAATAGGCTCAACCATATATTGAGATACACGC",
+        "predicted_ss": "....((((........))))........(((((....))))).(((((.....(((((((.......)))).......)))..)))))..",
+        "freq_MFE": 0.0381518,
+        "ensemble_diversity": 26.23,
+        "PSI": 0.0,
+        "predicted_PSI": 0.051881716
+      },
+      {
+        "predicted_mfe": -10.3,
+        "kl": 0.0532283317829192,
+        "exon": "ACACCGCCTGCTCATCCGAACTGCGATACCCGACACATTAAATCCAGTCACAAATTAGCCCCACGAACAC",
+        "predicted_ss": "....(((((......))))).........((((.(((..............)))))))......((((((............)).)))).",
+        "freq_MFE": 0.0571484,
+        "ensemble_diversity": 9.79,
+        "PSI": 1.0,
+        "predicted_PSI": 0.9481522
+      },
+      {
+        "predicted_mfe": -10.0,
+        "kl": 0.0531714266320534,
+        "exon": "AACCACACTTACTCCGTCGTATATCGAGACCCGAAACACCAGCAAGCCCGTAAATTTTCTATACTCGGAT",
+        "predicted_ss": ".............((.((((..((((..((((((((.....))).........................))))).))))..)))).))..",
+        "freq_MFE": 0.048218,
+        "ensemble_diversity": 13.63,
+        "PSI": 0.9931662870159452,
+        "predicted_PSI": 0.9260966
+      }
+    ],
+    "high": [
+      {
+        "predicted_mfe": -10.2,
+        "kl": 2.430801049228284,
+        "exon": "GCGACCATCCAGGTAAGCTCCTCTTACTCAATCCAGAGAACTACCGCACTACTTCCCCAGAAAAGAAAGA",
+        "predicted_ss": ".....(((..((.(((.....)))..)).)))....(((......)))...................((((.............))))..",
+        "freq_MFE": 0.0297429,
+        "ensemble_diversity": 23.51,
+        "PSI": 0.0,
+        "predicted_PSI": 0.91203517
+      },
+      {
+        "predicted_mfe": -11.1,
+        "kl": 2.078188544018849,
+        "exon": "CGCGGGCCTCACACGTACACCTACGATACAACAACAAGTTAAAGATCTAACACAACAACACAATCTTTTT",
+        "predicted_ss": "............(((((((....((((....))))............(..((((((................))))))..))))))))..",
+        "freq_MFE": 0.130067,
+        "ensemble_diversity": 20.34,
+        "PSI": 0.0076335877862595,
+        "predicted_PSI": 0.88215375
+      },
+      {
+        "predicted_mfe": -8.7,
+        "kl": 2.035005966583135,
+        "exon": "TCACGCCCCCTTCTCTCAAACCCACCTTACATCGATCCATTCTACAAGCAACAAAAAAACTCGTTGCAGT",
+        "predicted_ss": "......(((((................))))).((((.((...((.....)).....(((((..........))))).)).)))).....",
+        "freq_MFE": 0.0546428,
+        "ensemble_diversity": 15.43,
+        "PSI": 0.7986577181208053,
+        "predicted_PSI": 0.04216992
+      }
+    ]
+  }
+}
