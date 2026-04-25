@@ -12,7 +12,7 @@ CSV_PATH = BASE_DIR / "data" / "test_data_rna_structure.csv"
 OUTPUT_DIR = BASE_DIR / "performance" / "generated_files"
 OUTPUT_PATH = OUTPUT_DIR / "model_performance_large_KL.png"
 NUM_BINS = 20
-KL_THRESHOLDS = [0.1, 0.2, 0.5, 1.0]
+KL_THRESHOLDS = [0.5, 1.0]
 
 
 def make_bin_series(df: pd.DataFrame, feature: str, bins: int = NUM_BINS) -> pd.Series:
@@ -26,30 +26,6 @@ def proportion_above_threshold_per_bin(
 	threshold: float,
 	bins: int = NUM_BINS,
 ) -> pd.DataFrame:
-	if feature == "num_base_pairs":
-		df_bp = df.copy()
-
-		# Group base-pair counts into width-2 bins: 0-1, 2-3, 4-5, ...
-		df_bp["_bp_group"] = (df_bp["num_base_pairs"] // 2) * 2
-
-		grouped = (
-			df_bp.assign(is_above=df_bp["kl"] > threshold)
-			.groupby("_bp_group", observed=True)
-			.agg(
-				proportion=("is_above", "mean"),
-				n=("is_above", "size"),
-			)
-			.reset_index()
-			.sort_values("_bp_group")
-		)
-
-		# Keep only bins with enough samples.
-		grouped = grouped[grouped["n"] >= 50].copy()
-
-		# Use midpoint as x value: 0.5, 2.5, 4.5, ...
-		grouped["bin"] = grouped["_bp_group"] + 0.5
-		return grouped
-
 	binned = make_bin_series(df, feature=feature, bins=bins)
 	grouped = (
 		df.assign(_bin=binned, is_above=df["kl"] > threshold)
@@ -79,10 +55,10 @@ def plot_feature(
 	ax.plot(x, y, marker="o", linewidth=2.0, markersize=4)
 	if feature == "predicted_mfe":
 		feature_label = "MFE"
+	elif feature == "freq_MFE":
+		feature_label = "Frequency of MFE"
 	elif feature == "ensemble_diversity":
 		feature_label = "Ensemble Diversity"
-	elif feature == "num_base_pairs":
-		feature_label = "Number of Base Pairs"
 	else:
 		feature_label = feature
 
@@ -91,16 +67,10 @@ def plot_feature(
 		fontsize=12,
 		pad=10,
 	)
-	if feature == "num_base_pairs":
-		ax.set_xlabel("Number of base pairs", fontsize=11)
-	else:
-		ax.set_xlabel(f"{feature} bin", fontsize=11)
+	ax.set_xlabel(f"{feature_label} bin", fontsize=11)
 	ax.set_ylabel("Proportion (KL > threshold)", fontsize=11)
 	ax.grid(True, alpha=0.25)
-	if feature == "num_base_pairs":
-		ax.set_xticks(x)
-	else:
-		ax.set_xticks(range(1, bins + 1))
+	ax.set_xticks(range(1, bins + 1))
 	if y.size == 0:
 		ymax = 1.0
 	else:
@@ -112,23 +82,19 @@ def plot_feature(
 
 def main() -> None:
 	df = pd.read_csv(CSV_PATH)
-	required_cols = {"kl", "predicted_mfe", "ensemble_diversity", "predicted_ss"}
+	required_cols = {"kl", "predicted_mfe", "freq_MFE", "ensemble_diversity"}
 	missing = required_cols - set(df.columns)
 	if missing:
 		raise ValueError(f"Missing required columns in {CSV_PATH}: {sorted(missing)}")
 
-	df = df.copy()
-	# Dot-bracket base pairs correspond to opening parentheses.
-	df["num_base_pairs"] = df["predicted_ss"].astype(str).str.count(r"\(")
-
 	plot_specs: list[tuple[str, float]] = []
 	for threshold in KL_THRESHOLDS:
 		plot_specs.append(("predicted_mfe", threshold))
+		plot_specs.append(("freq_MFE", threshold))
 		plot_specs.append(("ensemble_diversity", threshold))
-		plot_specs.append(("num_base_pairs", threshold))
 
 	plt.close("all")
-	fig, axes = plt.subplots(len(plot_specs), 1, figsize=(12, 50))
+	fig, axes = plt.subplots(len(plot_specs), 1, figsize=(12, 24))
 	for ax, (feature, threshold) in zip(axes, plot_specs):
 		summary = proportion_above_threshold_per_bin(
 			df,
