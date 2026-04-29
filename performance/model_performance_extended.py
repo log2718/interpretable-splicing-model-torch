@@ -18,6 +18,15 @@ FEATURE_LABELS = {
 	"freq_MFE": "Frequency of MFE",
 	"ensemble_diversity": "Ensemble Diversity",
 }
+VIOLIN_FACE_COLOR = "#c7d4e8"
+VIOLIN_EDGE_COLOR = "#6f86b7"
+PERCENTILE_COLORS = {
+	60: "#7a1f1f",
+	70: "#8b3a2a",
+	80: "#5c2d91",
+	90: "#1f5e5e",
+	95: "#2f4f2f",
+}
 
 
 def make_bin_series(df: pd.DataFrame, feature: str, bins: int = NUM_BINS) -> pd.Series:
@@ -58,9 +67,9 @@ def plot_feature(
 		showextrema=False,
 	)
 	for body in parts["bodies"]:
-		body.set_facecolor("#4c78a8")
-		body.set_edgecolor("#2f4b7c")
-		body.set_alpha(0.75)
+		body.set_facecolor(VIOLIN_FACE_COLOR)
+		body.set_edgecolor(VIOLIN_EDGE_COLOR)
+		body.set_alpha(1.0)
 
 	ax.set_title(
 		f"{value_label} distribution by {feature_label} bin",
@@ -96,23 +105,23 @@ def plot_feature(
 
 	# Draw percentile horizontal bars if requested
 	if percentiles and len(data) > 0:
-		# choose colors/styles for percentiles
-		style_map = {}
-		# default palette for percentiles
-		palette = ["#e45756", "#4c78a8", "#54a24b", "#b279a2", "#ffb400"]
-		for i, p in enumerate(percentiles):
-			style_map[p] = {"color": palette[i % len(palette)], "linestyle": ["-", "--", ":", "-."][i % 4]}
-
 		half_width = 0.18
 		for idx, vals in enumerate(bin_values, start=1):
 			if vals.size == 0:
 				continue
 			for p in percentiles:
 				qv = np.percentile(vals, p)
-				ax.hlines(qv, idx - half_width, idx + half_width, linewidth=2.0, color=style_map[p]["color"], linestyles=style_map[p]["linestyle"])
+				ax.hlines(
+					qv,
+					idx - half_width,
+					idx + half_width,
+					linewidth=2.0,
+					color=PERCENTILE_COLORS[p],
+					linestyles="-",
+				)
 
 		# add a concise legend (one entry per percentile)
-		handles = [Line2D([0], [0], color=style_map[p]["color"], linestyle=style_map[p]["linestyle"], linewidth=2.0) for p in percentiles]
+		handles = [Line2D([0], [0], color=PERCENTILE_COLORS[p], linestyle="-", linewidth=2.0) for p in percentiles]
 		labels = [f"{p}th pct" for p in percentiles]
 		ax.legend(handles, labels, loc="upper right", fontsize=9)
 
