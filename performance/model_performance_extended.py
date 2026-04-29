@@ -150,7 +150,14 @@ def main() -> None:
 	fig, axes = plt.subplots(len(plot_specs), 1, figsize=(13, 18), sharex=False)
 	for ax, feature in zip(axes, plot_specs):
 		bin_values = kl_values_per_bin(df, feature=feature, bins=NUM_BINS, value_col="log_kl")
-		plot_feature(ax=ax, bin_values=bin_values, feature=feature, bins=NUM_BINS, value_label="log10(KL + 1e-4)")
+		plot_feature(
+			ax=ax,
+			bin_values=bin_values,
+			feature=feature,
+			bins=NUM_BINS,
+			value_label="log10(KL + 1e-4)",
+			percentiles=[60, 70, 80, 90, 95],
+		)
 
 	fig.suptitle("Log10-KL distributions by feature bins (20 quantile bins)", fontsize=16, y=1.0)
 	plt.tight_layout()
