@@ -73,7 +73,50 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="Number of threads to use for ViennaRNA.",
     )
+    parser.add_argument(
+        "--output-csv",
+        default="",
+        help=(
+            "Optional output CSV path. If provided, save an annotated CSV "
+            "containing original columns plus predicted secondary structure, "
+            "MFE, and other structure-related annotations."
+        ),
+    )
     return parser
+
+
+def _build_annotated_csv(
+    df: pd.DataFrame, dataset: dict, sequence_column: str
+) -> pd.DataFrame:
+    """Merge original CSV columns with structure annotations from the dataset.
+
+    Args:
+        df: The original input dataframe.
+        dataset: Dataset dictionary produced by ``dataframe_to_dataset``.
+        sequence_column: Name of the sequence column used during preprocessing.
+
+    Returns:
+        An annotated dataframe ready for CSV export.
+    """
+    import numpy as np
+
+    out = df.copy()
+
+    # Core structure predictions
+    out["predicted_secondary_struct"] = dataset["structure"].tolist()
+    out["predicted_MFE"] = dataset["mfe"].tolist()
+
+    # Flanked model sequence (useful for reproducing predictions)
+    out["model_sequence"] = dataset["model_sequence"].tolist()
+
+    # Per-position wobble sums (wobbles shape: N×1×L)
+    wobble_arr = dataset["wobbles"]
+    out["wobble_count"] = wobble_arr.reshape(wobble_arr.shape[0], -1).sum(axis=1).astype(int)
+
+    # Whether flanks were added
+    out["flanks_added"] = bool(dataset["added_flanks"])
+
+    return out
 
 
 def main() -> None:
@@ -91,6 +134,8 @@ def main() -> None:
         commands_file=args.commands_file,
         num_threads=args.num_threads,
     )
+
+    # ── Save NPZ (always) ─────────────────────────────────────────────────
     output_path = save_dataset_npz(dataset, args.output_path)
 
     print(f"Saved dataset to {Path(output_path).resolve()}")
@@ -99,6 +144,14 @@ def main() -> None:
     print(f"Structure tensor shape (N, 3, L): {dataset['struct_oh'].shape}")
     print(f"Wobble tensor shape (N, 1, L): {dataset['wobbles'].shape}")
     print("Feature arrays are NumPy arrays; convert them to torch tensors for model inference.")
+
+    # ── Save annotated CSV (optional) ─────────────────────────────────────
+    if args.output_csv:
+        csv_path = Path(args.output_csv)
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        annotated_df = _build_annotated_csv(df, dataset, args.sequence_column)
+        annotated_df.to_csv(csv_path, index=False)
+        print(f"Saved annotated CSV to {csv_path.resolve()}  ({len(annotated_df)} rows)")
 
 
 if __name__ == "__main__":
