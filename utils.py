@@ -14,8 +14,11 @@ import pandas as pd
 
 random.seed(42)
 
-LEFT_FLANK = "CATCCAGGTT"
-RIGHT_FLANK = "CAGGTCTGAC"
+#LEFT_FLANK = "CATCCAGGTT"
+#RIGHT_FLANK = "CAGGTCTGAC"
+# left - 40nt, right - 30nt
+LEFT_FLANK = "CACTGACTCTCTCTGCCTATGTCTTTCTCTGCCATCCAGG"
+RIGHT_FLANK = "CAGGTCTGACTATGGGACCCTTGATGTTTT"
 DEFAULT_SEQUENCE_COLUMN = "exon"
 RNA_ALPHABET = "ACGU"
 DNA_ALPHABET = "ACGT"
@@ -30,8 +33,8 @@ def add_flanking(seq_nts: Sequence[str]) -> list[str]:
         seq_nts: Core exon sequences.
 
     Returns:
-        A list where each sequence is wrapped with the canonical 10 nt left and
-        right flanks.
+        A list where each sequence is wrapped with the canonical 40 nt left and
+        30 nt right flanks.
     """
     return [LEFT_FLANK + seq + RIGHT_FLANK for seq in seq_nts]
 

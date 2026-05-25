@@ -243,7 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     mdl = parser.add_argument_group("model")
     mdl.add_argument(
-        "--input-length", type=int, default=90,
+        "--input-length", type=int, default=140,
         help="Input sequence length passed to PNASModel.",
     )
     mdl.add_argument(

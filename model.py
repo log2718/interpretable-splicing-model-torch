@@ -231,12 +231,12 @@ class ResidualTuner(nn.Module):
 class PNASModel(nn.Module):
     """Inference model for exon inclusion prediction from sequence and structure."""
 
-    def __init__(self, input_length=90, seq_in_channels=4, struct_in_channels=3, wobble_in_channels=1, use_batchnorm=True):
+    def __init__(self, input_length=140, seq_in_channels=4, struct_in_channels=3, wobble_in_channels=1, use_batchnorm=True):
         """Initialize the model architecture.
 
         Args:
             input_length: Total length of the input window, including flanking
-                context. Defaults to ``90``.
+                context. Defaults to ``140`` (40 nt left + 70 nt exon + 30 nt right).
             use_batchnorm: Passed through to ResidualTuner. If False, the two
                 BatchNorm1d layers in the tuner are replaced with nn.Identity.
         """
@@ -354,16 +354,16 @@ class PNASModel(nn.Module):
             ``return_logits`` is true, otherwise sigmoid-transformed
             probabilities.
         """
-        # Compute sequence activations - each is (batch_size, F_seq, 85)
+        # Compute sequence activations - each is (batch_size, F_seq, 135)  [140 - 6 + 1]
         conv_skip_out = self.conv_skip(x_seq) + self.position_bias_skip.unsqueeze(0)  # Add position bias
         conv_incl_out = self.conv_incl(x_seq) + self.position_bias_incl.unsqueeze(0)
         
-        # Compute structure activations - each is (batch_size, F_struct, 90)
+        # Compute structure activations - each is (batch_size, F_struct, 140)  [same padding]
         struct_input = torch.cat([x_seq, x_struct, x_wobble], dim=1)  # Concatenate along channel dimension
         conv_struct_skip_out = self.conv_struct_skip(struct_input) + self.position_bias_skip_struct.unsqueeze(0)
         conv_struct_incl_out = self.conv_struct_incl(struct_input) + self.position_bias_incl_struct.unsqueeze(0)
 
-        # Crop to match sequence activations
+        # Crop to match sequence activations (remove seq_kernel_size-1 = 5 positions: 2 left + 3 right)
         conv_struct_skip_out = conv_struct_skip_out[:, :, 2:-3]
         conv_struct_incl_out = conv_struct_incl_out[:, :, 2:-3]
 
@@ -535,11 +535,11 @@ class PNASModel(nn.Module):
         """
         sd = dict(state_dict)  # shallow copy
 
-        F = 10  # fixed flank length
+        F = 30  # shorter flank length (right=30, left=40) — used as conservative padding anchor
         margin = 5
 
-        pad_seq = min(F + margin, (self.input_length - self.seq_kernel_size + 1)//2)  # -> 15
-        pad_struct = min(F + (self.struct_kernel_size - 1)//2 + margin, self.input_length//2)  # -> 29
+        pad_seq = min(F + margin, (self.input_length - self.seq_kernel_size + 1)//2)
+        pad_struct = min(F + (self.struct_kernel_size - 1)//2 + margin, self.input_length//2)
         target_seq_len = self.input_length - self.seq_kernel_size + 1
 
         # --- sequence pos bias: shape (num_seq_filters, input_length - seq_kernel + 1)
