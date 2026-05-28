@@ -1,17 +1,17 @@
-"""Add vienna60 model predictions and RNAfold ensemble features to a CSV.
+"""Add flank_40_30 model predictions and RNAfold ensemble features to a CSV.
 
 Enriches an annotated CSV with:
-  - predicted_PSI_60:     PSI from the vienna60 fine-tuned checkpoint
-  - kl_60:                per-exon KL divergence  KL(PSI ∥ predicted_PSI_60)
-  - freq_MFE:             frequency of MFE structure in Boltzmann ensemble
-  - ensemble_diversity:   ensemble diversity from RNAfold partition function
+  - predicted_PSI_flanks:  PSI from the flank_40_30 fine-tuned checkpoint
+  - kl_flanks:             per-exon KL divergence  KL(PSI ∥ predicted_PSI_flanks)
+  - freq_MFE:              frequency of MFE structure in Boltzmann ensemble
+  - ensemble_diversity:    ensemble diversity from RNAfold partition function
 
 Usage:
     python performance/add_vienna_predictions.py \\
-      --csv-path data/test_vienna60_annotated.csv \\
-      --test-npz data/test_vienna60.npz \\
-      --checkpoint checkpoints/vienna60/best_model_20260515_150124.pt \\
-      --temperature 60 \\
+      --csv-path data/test_flank_40_30.csv \\
+      --test-npz data/test_flank_40_30.npz \\
+      --checkpoint checkpoints/flank_40_30/best_model_20260525_030826.pt \\
+      --temperature 37 \\
       --no-batchnorm
 """
 
@@ -51,25 +51,28 @@ FEATURE_LINE_RE = re.compile(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Add predicted_PSI_60, kl_60, freq_MFE, and ensemble_diversity "
-            "columns to a vienna-experiment annotated CSV."
+            "Add predicted_PSI_flanks, kl_flanks, freq_MFE, and ensemble_diversity "
+            "columns to the flank_40_30 annotated CSV."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--csv-path", type=Path, required=True,
+        "--csv-path", type=Path,
+        default=BASE_DIR / "data" / "test_flank_40_30.csv",
         help="Annotated CSV to update in-place.",
     )
     parser.add_argument(
-        "--test-npz", type=Path, required=True,
+        "--test-npz", type=Path,
+        default=BASE_DIR / "data" / "test_flank_40_30.npz",
         help="Test NPZ produced by prepare_dataset.py (for model-ready tensors).",
     )
     parser.add_argument(
-        "--checkpoint", type=Path, required=True,
-        help="Model checkpoint (.pt) from checkpoints/vienna60/.",
+        "--checkpoint", type=Path,
+        default=BASE_DIR / "checkpoints" / "flank_40_30" / "best_model_20260525_030826.pt",
+        help="Model checkpoint (.pt) from checkpoints/flank_40_30/.",
     )
     parser.add_argument(
-        "--temperature", type=float, default=60.0,
+        "--temperature", type=float, default=37.0,
         help="RNAfold temperature in Celsius for ensemble features.",
     )
     parser.add_argument(
@@ -240,7 +243,7 @@ def main() -> None:
     df = pd.read_csv(args.csv_path)
     print(f"Loaded CSV: {args.csv_path}  ({len(df)} rows)")
 
-    # ── Step 1: Model inference → predicted_PSI_60 ────────────────────────
+    # ── Step 1: Model inference → predicted_PSI_flanks ────────────────────
     print("\n[1/3] Running model inference...")
     psi_preds = predict_psi(
         args.test_npz,
@@ -256,21 +259,21 @@ def main() -> None:
             f"CSV has {len(df)} rows."
         )
 
-    df["predicted_PSI_60"] = psi_preds
-    print(f"  predicted_PSI_60: mean={psi_preds.mean():.4f}, "
+    df["predicted_PSI_flanks"] = psi_preds
+    print(f"  predicted_PSI_flanks: mean={psi_preds.mean():.4f}, "
           f"std={psi_preds.std():.4f}")
 
-    # ── Step 2: KL divergence → kl_60 ────────────────────────────────────
+    # ── Step 2: KL divergence → kl_flanks ────────────────────────────────
     print("\n[2/3] Computing KL divergence...")
     if "PSI" not in df.columns:
         raise ValueError("CSV is missing required 'PSI' column.")
 
     kl_values = [
-        kl_divergence_binary(float(row["PSI"]), float(row["predicted_PSI_60"]))
+        kl_divergence_binary(float(row["PSI"]), float(row["predicted_PSI_flanks"]))
         for _, row in df.iterrows()
     ]
-    df["kl_60"] = kl_values
-    print(f"  kl_60: mean={np.mean(kl_values):.6f}, "
+    df["kl_flanks"] = kl_values
+    print(f"  kl_flanks: mean={np.mean(kl_values):.6f}, "
           f"median={np.median(kl_values):.6f}")
 
     # ── Step 3: RNAfold ensemble features → freq_MFE, ensemble_diversity ─
@@ -281,8 +284,7 @@ def main() -> None:
     freq_mfe_values: list[float] = []
     ensemble_diversity_values: list[float] = []
 
-    total_rows = len(df)
-    for idx, exon in enumerate(tqdm(df["exon"].astype(str), desc="RNAfold -p", unit="exon"), start=1):
+    for exon in tqdm(df["exon"].astype(str), desc="RNAfold -p", unit="exon"):
         freq_mfe, ensemble_div = compute_rnafold_features(
             exon, args.rnafold_bin, args.temperature
         )
@@ -297,7 +299,7 @@ def main() -> None:
     # ── Write back in-place ──────────────────────────────────────────────
     df.to_csv(args.csv_path, index=False)
     print(f"\n✓ Updated CSV in-place: {args.csv_path}")
-    print(f"  Columns added: predicted_PSI_60, kl_60, freq_MFE, ensemble_diversity")
+    print(f"  Columns added: predicted_PSI_flanks, kl_flanks, freq_MFE, ensemble_diversity")
     print(f"  Total columns: {len(df.columns)}")
 
 
