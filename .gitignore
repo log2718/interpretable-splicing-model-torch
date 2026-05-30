@@ -210,3 +210,6 @@ CLAUDE.md
 STATUS_TRACKER.md
 .claude
 dump
+
+# local context files
+CLAUDE.md
