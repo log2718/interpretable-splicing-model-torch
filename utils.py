@@ -16,14 +16,15 @@ random.seed(42)
 
 #LEFT_FLANK = "CATCCAGGTT"
 #RIGHT_FLANK = "CAGGTCTGAC"
-# left - 40nt, right - 30nt
-LEFT_FLANK = "CACTGACTCTCTCTGCCTATGTCTTTCTCTGCCATCCAGG"
+# left - 40nt (corrected: last 40 of the 150nt upstream flank), right - 30nt
+LEFT_FLANK = "CTGACTCTCTCTGCCTATGTCTTTCTCTGCCATCCAGGTT"
 RIGHT_FLANK = "CAGGTCTGACTATGGGACCCTTGATGTTTT"
 DEFAULT_SEQUENCE_COLUMN = "exon"
 RNA_ALPHABET = "ACGU"
 DNA_ALPHABET = "ACGT"
 STRUCTURE_ALPHABET = ".()"
-RNAFOLD_ENERGY_RE = re.compile(r"^([().]+)\s+\(\s*([^)]+?)\s*\)$")
+RNAFOLD_ENERGY_RE       = re.compile(r"^([().]+)\s+\(\s*([^)]+?)\s*\)$")
+RNAFOLD_GQUAD_ENERGY_RE = re.compile(r"^([().+~]+)\s+\(\s*([^)]+?)\s*\)$")
 
 
 def add_flanking(seq_nts: Sequence[str]) -> list[str]:
@@ -140,6 +141,7 @@ def RNAfold(
     maxBPspan: int = 0,
     commands_file: str = "",
     num_threads: int = 8,
+    gquad: bool = False,
 ) -> list[tuple[str, float]]:
     """Fold sequences with ViennaRNA ``RNAfold`` and return structures and MFEs.
 
@@ -180,6 +182,8 @@ def RNAfold(
         )
 
     command = [RNAfold_bin, "--noPS", "-T", str(temperature)]
+    if gquad:
+        command.append("-g")
     if commands_file:
         command.append(f"--commands={commands_file}")
     if maxBPspan:
@@ -209,10 +213,11 @@ def RNAfold(
             "sequences; expected at least two lines per sequence."
         )
 
+    pattern = RNAFOLD_GQUAD_ENERGY_RE if gquad else RNAFOLD_ENERGY_RE
     folded: list[tuple[str, float]] = []
     for seq_index in range(len(seqs)):
         structure_line = lines[(2 * seq_index) + 1]
-        match = RNAFOLD_ENERGY_RE.match(structure_line)
+        match = pattern.match(structure_line)
         if match is None:
             raise RuntimeError(f"Could not parse RNAfold output line: {structure_line!r}")
 
@@ -261,6 +266,7 @@ def rna_fold_structs(
     temperature: float = 37.0,
     commands_file: str = "",
     num_threads: int = 8,
+    gquad: bool = False,
 ) -> tuple[list[str], np.ndarray]:
     """Fold a batch of sequences and return structures plus MFEs.
 
@@ -282,6 +288,7 @@ def rna_fold_structs(
         maxBPspan=maxBPspan,
         commands_file=commands_file,
         num_threads=num_threads,
+        gquad=gquad,
     )
     structures = [structure for structure, _ in struct_mfes]
     mfes = np.asarray([mfe for _, mfe in struct_mfes], dtype=np.float32)
@@ -442,11 +449,14 @@ def make_dataset_dict(
     seq_nts: Sequence[str],
     *,
     add_flanks: bool = True,
+    left_flank: str | None = None,
+    right_flank: str | None = None,
     rnafold_bin: str = "RNAfold",
     temperature: float = 37.0,
     maxBPspan: int = 0,
     commands_file: str = "",
     num_threads: int = 8,
+    gquad: bool = False,
 ) -> dict[str, Any]:
     """Create a model-ready dataset dictionary from unflanked exon sequences.
 
@@ -456,8 +466,9 @@ def make_dataset_dict(
 
     Args:
         seq_nts: Unflanked exon sequences.
-        add_flanks: Whether to add the fixed model flanks before feature
-            computation.
+        add_flanks: Whether to add flanks before feature computation.
+        left_flank: Custom left flank (overrides utils.LEFT_FLANK).
+        right_flank: Custom right flank (overrides utils.RIGHT_FLANK).
         rnafold_bin: Executable name or path for ``RNAfold``.
         temperature: Folding temperature in Celsius.
         maxBPspan: Optional maximum base-pair span for RNAfold.
@@ -468,8 +479,10 @@ def make_dataset_dict(
         ``exon``, ``model_sequence``, ``seq_oh``, ``struct_oh``, ``wobbles``,
         ``structure``, and ``mfe``.
     """
+    _lf = (left_flank  or LEFT_FLANK).upper()
+    _rf = (right_flank or RIGHT_FLANK).upper()
     exons = [seq.upper() for seq in seq_nts]
-    model_sequences = add_flanking(exons) if add_flanks else exons
+    model_sequences = [_lf + seq + _rf for seq in exons] if add_flanks else exons
     seq_oh = one_hot_batch(model_sequences)
     struct_oh, structures, mfes = compute_structure(
         model_sequences,
@@ -481,7 +494,7 @@ def make_dataset_dict(
     )
     wobbles = compute_wobbles(model_sequences, structures)
 
-    return {
+    dataset: dict[str, Any] = {
         "exon": np.asarray(exons, dtype=str),
         "model_sequence": np.asarray(model_sequences, dtype=str),
         "seq_oh": seq_oh,
@@ -492,17 +505,35 @@ def make_dataset_dict(
         "added_flanks": np.asarray(add_flanks),
     }
 
+    if gquad:
+        gquad_results = RNAfold(
+            model_sequences,
+            RNAfold_bin=rnafold_bin,
+            temperature=temperature,
+            num_threads=num_threads,
+            gquad=True,
+        )
+        gquad_structs = [s for s, _ in gquad_results]
+        gquad_mfes = np.asarray([m for _, m in gquad_results], dtype=np.float32)
+        dataset["metadata_gquad_present"]    = np.asarray(['+' in s for s in gquad_structs])
+        dataset["metadata_MFE_delta_gquad"]  = (gquad_mfes - mfes).astype(np.float32)
+
+    return dataset
+
 
 def dataframe_to_dataset(
     df: pd.DataFrame,
     *,
     sequence_column: str = DEFAULT_SEQUENCE_COLUMN,
     add_flanks: bool = True,
+    left_flank: str | None = None,
+    right_flank: str | None = None,
     rnafold_bin: str = "RNAfold",
     temperature: float = 37.0,
     maxBPspan: int = 0,
     commands_file: str = "",
     num_threads: int = 8,
+    gquad: bool = False,
 ) -> dict[str, Any]:
     """Convert a sequence dataframe into a model-ready dataset dictionary.
 
@@ -529,11 +560,14 @@ def dataframe_to_dataset(
     dataset = make_dataset_dict(
         exons,
         add_flanks=add_flanks,
+        left_flank=left_flank,
+        right_flank=right_flank,
         rnafold_bin=rnafold_bin,
         temperature=temperature,
         maxBPspan=maxBPspan,
         commands_file=commands_file,
         num_threads=num_threads,
+        gquad=gquad,
     )
     dataset["sequence_column"] = np.asarray(sequence_column, dtype=str)
 

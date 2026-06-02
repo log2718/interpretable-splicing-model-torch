@@ -42,7 +42,7 @@ from model import PNASModel
 from utils import LEFT_FLANK, RIGHT_FLANK
 
 from performance.lib.kl import kl_bernoulli_vec
-from performance.lib.rnafold import check_rnafold, fold_ensemble, fold_mfe
+from performance.lib.rnafold import check_rnafold, fold_ensemble, fold_gquad, fold_mfe
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -66,6 +66,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--force",        action="store_true", help="Overwrite existing non-NaN columns")
 
     # Stage selection
+    p.add_argument(
+        "--gquad", action="store_true",
+        help="Also compute gquad_present_{config} and MFE_delta_gquad_{config} via RNAfold -g."
+    )
+
     g = p.add_mutually_exclusive_group()
     g.add_argument("--inference-only", action="store_true")
     g.add_argument("--kl-only",        action="store_true")
@@ -205,6 +210,45 @@ def main() -> None:
         print(f"  {div_col}: mean={np.mean(div_vals):.6f}")
     elif run_rnafold:
         print(f"\n[rnafold] {mfe_col}/{freq_col}/{div_col} already present — skipping (use --force)")
+
+    # ── Stage 4: G-quadruplex features (optional) ─────────────────────────────
+    gquad_col     = f"gquad_present_{cfg}"
+    mfe_delta_col = f"MFE_delta_gquad_{cfg}"
+
+    if args.gquad and run_rnafold and any(
+        _needs_fill(df, col, args.force) for col in [gquad_col, mfe_delta_col]
+    ):
+        if args.temperature is None:
+            raise ValueError("--temperature is required for the gquad stage.")
+        if "exon" not in df.columns:
+            raise ValueError("CSV is missing required 'exon' column.")
+        check_rnafold(args.rnafold_bin)
+        print(f"\n[gquad] Computing {gquad_col}, {mfe_delta_col} at T={args.temperature}°C ...")
+
+        # We need the normal MFE for delta computation.
+        mfe_ref = df[mfe_col].values if mfe_col in df.columns else None
+        if mfe_ref is None or np.isnan(mfe_ref).any():
+            raise ValueError(
+                f"Column {mfe_col!r} must be present before computing gquad delta. "
+                "Run the rnafold stage first."
+            )
+
+        gquad_present_vals, mfe_delta_vals = [], []
+        for exon, mfe_normal in tqdm(
+            zip(df["exon"].astype(str), mfe_ref), total=len(df), desc="RNAfold -g", unit="exon"
+        ):
+            full_seq = left_flank + exon + right_flank
+            gquad_struct, gquad_mfe = fold_gquad(full_seq, args.rnafold_bin, args.temperature)
+            gquad_present_vals.append('+' in gquad_struct)
+            mfe_delta_vals.append(float(gquad_mfe) - float(mfe_normal))
+
+        if _needs_fill(df, gquad_col,     args.force): df[gquad_col]     = gquad_present_vals
+        if _needs_fill(df, mfe_delta_col, args.force): df[mfe_delta_col] = mfe_delta_vals
+        n_gquad = sum(gquad_present_vals)
+        print(f"  {gquad_col}: {n_gquad}/{len(df)} ({100*n_gquad/len(df):.1f}%) gquad-positive")
+        print(f"  {mfe_delta_col}: mean={np.mean(mfe_delta_vals):.4f}")
+    elif args.gquad and run_rnafold:
+        print(f"\n[gquad] {gquad_col}/{mfe_delta_col} already present — skipping (use --force)")
 
     # ── Write back ────────────────────────────────────────────────────────────
     df.to_csv(args.csv, index=False)

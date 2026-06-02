@@ -46,6 +46,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip adding the fixed model flanks before computing features.",
     )
     parser.add_argument(
+        "--left-flank",
+        default="",
+        help="Override the left flank sequence (default: utils.LEFT_FLANK).",
+    )
+    parser.add_argument(
+        "--right-flank",
+        default="",
+        help="Override the right flank sequence (default: utils.RIGHT_FLANK).",
+    )
+    parser.add_argument(
         "--rnafold-bin",
         default="RNAfold",
         help="Executable name or path for ViennaRNA RNAfold.",
@@ -82,6 +92,15 @@ def build_parser() -> argparse.ArgumentParser:
             "MFE, and other structure-related annotations."
         ),
     )
+    parser.add_argument(
+        "--gquad",
+        action="store_true",
+        help=(
+            "Also run RNAfold -g to compute G-quadruplex features: "
+            "gquad_present (bool) and MFE_delta_gquad (kcal/mol). "
+            "Doubles RNAfold calls but adds no other overhead."
+        ),
+    )
     return parser
 
 
@@ -116,6 +135,11 @@ def _build_annotated_csv(
     # Whether flanks were added
     out["flanks_added"] = bool(dataset["added_flanks"])
 
+    # G-quadruplex features (only present when --gquad was used)
+    if "metadata_gquad_present" in dataset:
+        out["gquad_present"]    = dataset["metadata_gquad_present"].tolist()
+        out["MFE_delta_gquad"]  = dataset["metadata_MFE_delta_gquad"].tolist()
+
     return out
 
 
@@ -128,11 +152,14 @@ def main() -> None:
         df,
         sequence_column=args.sequence_column,
         add_flanks=not args.no_flanks,
+        left_flank=args.left_flank or None,
+        right_flank=args.right_flank or None,
         rnafold_bin=args.rnafold_bin,
         temperature=args.temperature,
         maxBPspan=args.max_bp_span,
         commands_file=args.commands_file,
         num_threads=args.num_threads,
+        gquad=args.gquad,
     )
 
     # ── Save NPZ (always) ─────────────────────────────────────────────────
