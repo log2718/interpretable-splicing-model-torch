@@ -170,9 +170,7 @@ for ax, (region, label) in zip(axes, REGION_LABELS.items()):
         means.append(residual[sel].mean())
     bin_mids = np.array(bin_mids)
     means = np.array(means)
-    norm = mcolors.Normalize(vmin=bin_mids.min(), vmax=bin_mids.max())
-    colors = BLUES(norm(bin_mids) * 0.7 + 0.25)
-    ax.bar(range(len(bin_mids)), means, color=colors, edgecolor="white", linewidth=0.3)
+    ax.bar(range(len(bin_mids)), means, color=BLUES(0.6), edgecolor="white", linewidth=0.3)
     ax.axhline(0, color="grey", linewidth=0.8, linestyle="--")
     ax.set_title(label, fontsize=8)
     ax.set_xlabel("Score bin", fontsize=7)
@@ -200,9 +198,7 @@ for ax, (region, label) in zip(axes, REGION_LABELS.items()):
         variances.append(residual[sel].var())
     bin_mids = np.array(bin_mids)
     variances = np.array(variances)
-    norm = mcolors.Normalize(vmin=bin_mids.min(), vmax=bin_mids.max())
-    colors = BLUES(norm(bin_mids) * 0.7 + 0.25)
-    ax.bar(range(len(bin_mids)), variances, color=colors, edgecolor="white", linewidth=0.3)
+    ax.bar(range(len(bin_mids)), variances, color=BLUES(0.6), edgecolor="white", linewidth=0.3)
     ax.set_title(label, fontsize=8)
     ax.set_xlabel("Score bin", fontsize=7)
     ax.tick_params(axis="x", labelbottom=False)
@@ -234,6 +230,33 @@ plt.tight_layout()
 plt.savefig(OUT / "fig3_scatter_score_vs_residual_mfe.png", dpi=150, bbox_inches="tight")
 plt.close()
 
+# ── Figure 3b: 2D histogram of structure score vs residual, per region ───────
+
+print("Plotting figure 3b: 2D histogram structure score vs residual...")
+fig, axes = plt.subplots(1, 5, figsize=(20, 4))
+for ax, (region, label) in zip(axes, REGION_LABELS.items()):
+    scores = df[f"score_{region}"].values
+    h, xedges, yedges = np.histogram2d(
+        scores, residual,
+        bins=50,
+        range=[[scores.min(), scores.max()],
+               [np.percentile(residual, 1), np.percentile(residual, 99)]],
+    )
+    h = np.ma.masked_where(h == 0, h)
+    im = ax.pcolormesh(xedges, yedges, h.T,
+                       cmap="Blues",
+                       norm=mcolors.LogNorm(vmin=0.6, vmax=h.max()))
+    ax.axhline(0, color="tomato", linewidth=0.8, linestyle="--")
+    ax.set_title(label, fontsize=8)
+    ax.set_xlabel("Mean structure score", fontsize=7)
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04).set_label("Count", fontsize=6)
+
+axes[0].set_ylabel("Residual (pred − true)", fontsize=8)
+fig.suptitle("2D Histogram: Structure Score vs Residual by Region", fontsize=10, y=1.01)
+plt.tight_layout()
+plt.savefig(OUT / "fig3b_2d_hist_score_vs_residual.png", dpi=150, bbox_inches="tight")
+plt.close()
+
 # ── Figure 4: positional Pearson correlation heatmap ─────────────────────────
 
 print("Computing positional Pearson correlations...")
@@ -253,13 +276,7 @@ print("Plotting figure 4: positional correlation heatmap...")
 def plot_positional_line(corr_array, ylabel, title, out_path, vmin=None, vmax=None):
     fig, ax = plt.subplots(figsize=(14, 3.5))
     positions = np.arange(SEQ_LEN)
-    norm_c = mcolors.Normalize(
-        vmin=vmin if vmin is not None else corr_array.min(),
-        vmax=vmax if vmax is not None else corr_array.max(),
-    )
-    for i in range(SEQ_LEN - 1):
-        ax.plot(positions[i:i+2], corr_array[i:i+2],
-                color=BLUES(norm_c(corr_array[i]) * 0.75 + 0.2), linewidth=1.2)
+    ax.plot(positions, corr_array, color=BLUES(0.7), linewidth=1.2)
     ax.axhline(0, color="grey", linewidth=0.6, linestyle="--")
     ax.axvspan(0,   150, alpha=0.04, color="steelblue", label="Upstream flank")
     ax.axvspan(150, 220, alpha=0.10, color="navy",      label="Exon")
@@ -273,10 +290,6 @@ def plot_positional_line(corr_array, ylabel, title, out_path, vmin=None, vmax=No
     ax.set_ylabel(ylabel, fontsize=9)
     ax.set_title(title, fontsize=10)
     ax.set_xlim(0, SEQ_LEN - 1)
-    sm = plt.cm.ScalarMappable(cmap="Blues", norm=norm_c)
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, fraction=0.02, pad=0.01)
-    cbar.set_label("r value", fontsize=7)
     ax.legend(loc="upper left", fontsize=6, framealpha=0.5)
     plt.tight_layout()
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
@@ -366,5 +379,39 @@ plot_positional_line(
     vmin=shared_vmin, vmax=shared_vmax,
 )
 print("  fig7 saved.")
+
+# ── Figure 8: combined over + sign-flipped under ─────────────────────────────
+# pos_over:  r(structure, |residual|) for residual>0  →  positive r = more structure → larger over-prediction
+# -pos_under: negate r(structure, |residual|) for residual<0  →  positive r = more structure → less negative (higher value)
+# Both now share the same directional meaning: positive r = more structure → higher residual value
+
+print("Plotting figure 8: combined directional correlation...")
+# Average over-prediction r with sign-flipped under-prediction r.
+# Both carry the same directional meaning: positive = more structure → higher residual value.
+pos_combined = (pos_over + (-pos_under)) / 2
+
+fig, ax = plt.subplots(figsize=(14, 3.5))
+positions = np.arange(SEQ_LEN)
+
+ax.plot(positions, pos_combined, color=BLUES(0.7), linewidth=1.2)
+ax.axhline(0, color="grey", linewidth=0.6, linestyle="--")
+ax.axvspan(0,   150, alpha=0.04, color="steelblue", label="Upstream flank")
+ax.axvspan(150, 220, alpha=0.10, color="navy",      label="Exon")
+ax.axvspan(220, 250, alpha=0.04, color="steelblue", label="Downstream flank")
+for x, lbl in [(127, "3′ SS start"), (229, "5′ SS end")]:
+    ax.axvline(x, color="tomato", linewidth=0.9, linestyle=":", alpha=0.8)
+    ax.text(x + 0.5, 0.01, lbl, rotation=90, fontsize=6,
+            va="bottom", ha="left", color="tomato",
+            transform=ax.get_xaxis_transform())
+
+ax.set_xlabel("Position along sequence (nt)", fontsize=9)
+ax.set_ylabel("Correlation between structure and residual value", fontsize=9)
+ax.set_title("Correlation between Structure and Residual Value by Position", fontsize=10)
+ax.set_xlim(0, SEQ_LEN - 1)
+ax.legend(loc="upper left", fontsize=6, framealpha=0.5)
+plt.tight_layout()
+plt.savefig(OUT / "fig8_combined_directional_correlation.png", dpi=150, bbox_inches="tight")
+plt.close()
+print("  fig8 saved.")
 
 print(f"\nAll figures saved to {OUT}/")
