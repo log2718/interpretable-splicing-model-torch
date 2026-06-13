@@ -128,27 +128,20 @@ class ResidualTuner(nn.Module):
             if use_batchnorm else nn.Identity()
         )
 
-        self.fc3    = nn.Linear(hidden_units, 1)
-        self.fc_var = nn.Linear(hidden_units, 1)  # variance head — parallel to fc3
+        self.fc3 = nn.Linear(hidden_units, 1)
 
         if not use_batchnorm:
             logger.info("ResidualTuner: BatchNorm disabled — bn1 and bn2 replaced with nn.Identity.")
 
-    def forward(self, inp: torch.Tensor, return_uncertainty: bool = False):
+    def forward(self, inp: torch.Tensor):
         """Run the residual calibration network.
 
         Args:
             inp: Tensor with shape ``(..., 1)``.
-            return_uncertainty: If True, also return ``(log_var, var)`` from
-                the variance head. Defaults to ``False`` for backward
-                compatibility.
 
         Returns:
-            If ``return_uncertainty`` is False: tensor with the same shape as
-            ``inp`` (logit_mu with residual connection).
-            If ``return_uncertainty`` is True: tuple ``(logit_mu, log_var, var)``
-            where ``var = softplus(fc_var(x)) + 1e-6`` and
-            ``log_var = log(var)``.
+            Tensor with the same shape as ``inp`` (logit_mu with residual
+            connection).
 
         Raises:
             ValueError: If the last dimension of ``inp`` is not ``1``.
@@ -169,14 +162,7 @@ class ResidualTuner(nn.Module):
         x = self.bn2(x)
 
         logit_mu = self.fc3(x).reshape(orig_shape) + inp  # residual connection
-
-        if not return_uncertainty:
-            return logit_mu
-
-        raw_var = self.fc_var(x).reshape(orig_shape)
-        var     = F.softplus(raw_var) + 1e-6
-        log_var = torch.log(var)
-        return logit_mu, log_var, var
+        return logit_mu
 
     @torch.no_grad()
     def load_weights_from_dict(self, weight_dict):
@@ -241,6 +227,46 @@ class ResidualTuner(nn.Module):
 
         return self
 
+class VarianceTuner(nn.Module):
+    """Interpretable variance head with a linear bottleneck.
+
+    Architecture (takes a scalar input from an external bottleneck)::
+
+        Linear(1, 16) → ReLU
+        Linear(16, 16) → ReLU
+        Linear(16, 1)
+        → Softplus + 1e-6        (var)
+        → log(var)               (log_var)
+
+    The 56→1 linear bottleneck lives in PNASModel as ``variance_bottleneck``
+    so it is a named, inspectable parameter of the full model.  VarianceTuner
+    then maps that single scalar to variance, making the full pipeline an
+    interpretable R → R function.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(1, 16)
+        self.fc2 = nn.Linear(16, 16)
+        self.fc3 = nn.Linear(16, 1)
+
+    def forward(self, z: torch.Tensor):
+        """Predict log-variance and variance from a scalar bottleneck value.
+
+        Args:
+            z: Tensor of shape ``(N, 1)`` — output of the linear bottleneck.
+
+        Returns:
+            Tuple ``(log_var, var)`` each of shape ``(N, 1)``.
+        """
+        x = F.relu(self.fc1(z))         # (N, 16)
+        x = F.relu(self.fc2(x))         # (N, 16)
+        x = self.fc3(x)                 # (N, 1)
+        var     = F.softplus(x) + 1e-6
+        log_var = torch.log(var)
+        return log_var, var
+
+
 class PNASModel(nn.Module):
     """Inference model for exon inclusion prediction from sequence and structure."""
 
@@ -294,6 +320,8 @@ class PNASModel(nn.Module):
 
         ### Tuner ###
         self.tuner = ResidualTuner(hidden_units=4, use_batchnorm=use_batchnorm)
+        self.variance_bottleneck = nn.Linear(56, 1)  # interpretable linear projection, no activation
+        self.variance_tuner = VarianceTuner()
         self.output_activation = nn.Sigmoid()
 
         logger.info(
@@ -362,13 +390,14 @@ class PNASModel(nn.Module):
             x_wobble: Wobble tensor of shape ``(batch_size, 1, input_length)``.
             return_logits: If True, return raw logits instead of sigmoid PSI.
             return_uncertainty: If True, also return ``(log_var, var)`` from
-                the variance head alongside the main prediction.
+                ``VarianceTuner`` alongside the main prediction.
 
         Returns:
             If both flags are False: sigmoid PSI tensor of shape ``(batch_size,)``.
             If ``return_logits`` is True: logit_mu of shape ``(batch_size,)``.
             If ``return_uncertainty`` is True: tuple ``(prediction, log_var, var)``
-            where prediction is logits or PSI depending on ``return_logits``.
+            where prediction is logits or PSI depending on ``return_logits``,
+            and ``log_var``/``var`` each have shape ``(batch_size,)``.
         """
         # Compute sequence activations - each is (batch_size, F_seq, 135)  [140 - 6 + 1]
         conv_skip_out = self.conv_skip(x_seq) + self.position_bias_skip.unsqueeze(0)  # Add position bias
@@ -387,24 +416,28 @@ class PNASModel(nn.Module):
         activations_skip = self.energy_activation_skip(torch.cat([conv_skip_out, conv_struct_skip_out], dim=1))  # (batch_size, F_seq + F_struct, L-5)
         activations_incl = self.energy_activation_incl(torch.cat([conv_incl_out, conv_struct_incl_out], dim=1))  # (batch_size, F_seq + F_struct, L-5)
 
+        # Variance branch: global avg pool → linear bottleneck → VarianceTuner
+        if return_uncertainty:
+            h = torch.cat([activations_incl, activations_skip], dim=1)  # (N, 56, L-5)
+            h = h.mean(dim=2)                                            # (N, 56)
+            z = self.variance_bottleneck(h)                              # (N, 1) — linear, no activation
+            log_var, var = self.variance_tuner(z)                        # (N, 1) each
+
         # Apply sum-difference
         energy_in = torch.stack([activations_incl, activations_skip], dim=1)  # (batch_size, 2, F_seq + F_struct, L-5)
         energy_out = self.energy_seq_struct(energy_in).unsqueeze(-1)  # (batch_size, 1)
 
-        # Apply tuner — optionally also get variance
-        if return_uncertainty:
-            logit_mu, log_var, var = self.tuner(energy_out, return_uncertainty=True)
-            pred = logit_mu.squeeze() if return_logits else self.output_activation(logit_mu).squeeze()
-            return pred, log_var.squeeze(), var.squeeze()
-
         tuner_out = self.tuner(energy_out)  # (batch_size, 1)
 
         if return_logits:
-            return tuner_out.squeeze()  # (batch_size,)
+            pred = tuner_out.squeeze()
+        else:
+            pred = self.output_activation(tuner_out).squeeze()
 
-        # compute sigmoid, return (0, 1)
-        out = self.output_activation(tuner_out).squeeze()  # (batch_size,)
-        return out
+        if return_uncertainty:
+            return pred, log_var.squeeze(), var.squeeze()
+
+        return pred
 
     @torch.no_grad()
     def shift_output_bias_(self, delta: float | torch.Tensor):

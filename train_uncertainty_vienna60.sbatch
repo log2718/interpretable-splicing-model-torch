@@ -31,11 +31,12 @@ singularity exec --nv \
       --test-npz data/test_vienna60.npz \
       --input-length 90 \
       --checkpoint checkpoints/vienna60/best_model_20260515_150124.pt \
-      --checkpoint-dir checkpoints/vienna60_uncertainty \
+      --checkpoint-dir checkpoints/vienna60_uncertainty_v2 \
       --uncertainty \
       --freeze-epochs 5 \
       --lr 1e-3 \
       --lr-phase2 1e-4 \
+      --lambda 1.0 \
       --epochs 100 \
       --patience 10 \
       --batch-size 256 \

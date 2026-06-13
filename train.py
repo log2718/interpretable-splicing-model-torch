@@ -49,24 +49,31 @@ def kl_divergence_from_logits(logits, targets):
     )
 
 
-def gaussian_nll_logit(logit_mu, log_var, var, targets):
-    """Gaussian NLL in logit space.
+def gaussian_nll_logit(logit_mu, log_var, var, targets, lambda_: float = 1.0):
+    """Gaussian NLL in logit space with a tunable regularization weight.
 
-    Models logit(PSI) ~ Normal(logit_mu, var).  Targets are clipped away from
-    0/1 before taking logit to avoid ±inf.
+    Loss = mean(lambda_ * 0.5 * log_var  +  0.5 * (logit_true - logit_mu)² / var)
+
+    Targets are clamped to [1e-2, 1-1e-2] before logit to avoid penalising
+    unresolvable differences at extreme PSI (e.g. 99% vs 99.9%).
 
     Args:
         logit_mu: Predicted mean in logit space, shape ``(batch,)``.
         log_var:  log of predicted variance, shape ``(batch,)``.
         var:      Predicted variance (softplus + eps), shape ``(batch,)``.
         targets:  True PSI values in [0, 1], shape ``(batch,)``.
+        lambda_:  Weight on the log_var term (uncertainty regularisation).
 
     Returns:
-        Scalar mean NLL.
+        Tuple ``(loss, term1_val, term2_val)`` where ``loss`` is the scalar
+        mean NLL (with gradient), and ``term1_val`` / ``term2_val`` are
+        Python floats for logging (lambda_ * log_var term and residual term).
     """
-    logit_true = torch.logit(targets.clamp(1e-6, 1 - 1e-6))
-    nll = 0.5 * (log_var + (logit_true - logit_mu) ** 2 / var)
-    return nll.mean()
+    logit_true = torch.logit(targets.clamp(1e-2, 1 - 1e-2))
+    term1 = 0.5 * log_var                               # uncertainty penalty
+    term2 = 0.5 * (logit_true - logit_mu) ** 2 / var   # fit term
+    loss  = (lambda_ * term1 + term2).mean()
+    return loss, (lambda_ * term1).mean().item(), term2.mean().item()
 
 
 def rmse(pred: torch.Tensor, target: torch.Tensor) -> float:
@@ -75,15 +82,12 @@ def rmse(pred: torch.Tensor, target: torch.Tensor) -> float:
 
 # ── Per-epoch loops ───────────────────────────────────────────────────────────
 
-def train_epoch(model, loader, optimizer, loss_fn, device, uncertainty: bool = False) -> dict:
-    """One forward+backward pass over ``loader``. Returns loss and RMSE.
-
-    Args:
-        uncertainty: If True, runs the uncertainty forward pass and uses
-            ``gaussian_nll_logit`` as the loss (``loss_fn`` is ignored).
-    """
+def train_epoch(model, loader, optimizer, loss_fn, device,
+                uncertainty: bool = False, lambda_: float = 1.0) -> dict:
+    """One forward+backward pass over ``loader``. Returns loss, RMSE, and
+    (when uncertainty=True) per-term NLL components and mean KL divergence."""
     model.train()
-    total_loss = 0.0
+    total_loss = total_term1 = total_term2 = total_kl = 0.0
     pred_list, target_list = [], []
 
     pbar = tqdm(loader, desc="  train", leave=False, unit="batch")
@@ -100,7 +104,11 @@ def train_epoch(model, loader, optimizer, loss_fn, device, uncertainty: bool = F
                                            return_logits=True,
                                            return_uncertainty=True)
             pred_probs = torch.sigmoid(logit_mu)
-            loss = gaussian_nll_logit(logit_mu, log_var, var, y)
+            loss, t1, t2 = gaussian_nll_logit(logit_mu, log_var, var, y, lambda_)
+            total_term1 += t1 * y.size(0)
+            total_term2 += t2 * y.size(0)
+            with torch.no_grad():
+                total_kl += kl_divergence_from_logits(logit_mu, y).item() * y.size(0)
         else:
             logits     = model(seq, struct, wobble, return_logits=True)
             pred_probs = torch.sigmoid(logits)
@@ -115,15 +123,23 @@ def train_epoch(model, loader, optimizer, loss_fn, device, uncertainty: bool = F
 
         pbar.set_postfix(batch_loss=f"{loss.item():.5f}")
 
-    preds   = torch.cat(pred_list)
-    targets = torch.cat(target_list)
-    return {"loss": total_loss / len(loader.dataset), "rmse": rmse(preds, targets)}
+    n     = len(loader.dataset)
+    preds = torch.cat(pred_list)
+    tgts  = torch.cat(target_list)
+    out   = {"loss": total_loss / n, "rmse": rmse(preds, tgts)}
+    if uncertainty:
+        out["term1"] = total_term1 / n
+        out["term2"] = total_term2 / n
+        out["kl"]    = total_kl    / n
+    return out
 
 
-def eval_epoch(model, loader, loss_fn, device, uncertainty: bool = False) -> dict:
-    """No-grad evaluation pass over ``loader``. Returns loss and RMSE."""
+def eval_epoch(model, loader, loss_fn, device,
+               uncertainty: bool = False, lambda_: float = 1.0) -> dict:
+    """No-grad evaluation pass over ``loader``. Returns loss, RMSE, and
+    (when uncertainty=True) per-term NLL components and mean KL divergence."""
     model.eval()
-    total_loss = 0.0
+    total_loss = total_term1 = total_term2 = total_kl = 0.0
     pred_list, target_list = [], []
 
     pbar = tqdm(loader, desc="  eval ", leave=False, unit="batch")
@@ -139,7 +155,10 @@ def eval_epoch(model, loader, loss_fn, device, uncertainty: bool = False) -> dic
                                                return_logits=True,
                                                return_uncertainty=True)
                 pred_probs = torch.sigmoid(logit_mu)
-                loss = gaussian_nll_logit(logit_mu, log_var, var, y)
+                loss, t1, t2 = gaussian_nll_logit(logit_mu, log_var, var, y, lambda_)
+                total_term1 += t1 * y.size(0)
+                total_term2 += t2 * y.size(0)
+                total_kl    += kl_divergence_from_logits(logit_mu, y).item() * y.size(0)
             else:
                 logits     = model(seq, struct, wobble, return_logits=True)
                 pred_probs = torch.sigmoid(logits)
@@ -151,9 +170,15 @@ def eval_epoch(model, loader, loss_fn, device, uncertainty: bool = False) -> dic
 
             pbar.set_postfix(batch_loss=f"{loss.item():.5f}")
 
-    preds   = torch.cat(pred_list)
-    targets = torch.cat(target_list)
-    return {"loss": total_loss / len(loader.dataset), "rmse": rmse(preds, targets)}
+    n     = len(loader.dataset)
+    preds = torch.cat(pred_list)
+    tgts  = torch.cat(target_list)
+    out   = {"loss": total_loss / n, "rmse": rmse(preds, tgts)}
+    if uncertainty:
+        out["term1"] = total_term1 / n
+        out["term2"] = total_term2 / n
+        out["kl"]    = total_kl    / n
+    return out
 
 
 # ── Training loop ─────────────────────────────────────────────────────────────
@@ -180,16 +205,17 @@ def train(model, train_loader, val_loader, hparams: dict) -> dict:
     weight_decay   = hparams.get("weight_decay", 0.0)
     loss_fn        = hparams.get("loss_fn", kl_divergence_from_logits)
     uncertainty    = hparams.get("uncertainty", False)
-    freeze_epochs  = hparams.get("freeze_epochs", 0)  # phase-1 length
+    freeze_epochs  = hparams.get("freeze_epochs", 0)
+    lambda_        = hparams.get("lambda_", 1.0)
 
     model = model.to(device)
 
-    # Phase 1: freeze all params except fc_var so only the variance head trains
+    # Phase 1: freeze all params except the variance branch
     if uncertainty and freeze_epochs > 0:
         for name, p in model.named_parameters():
-            p.requires_grad = ("fc_var" in name)
+            p.requires_grad = ("variance_bottleneck" in name or "variance_tuner" in name)
         logger.info(
-            f"Phase 1 — freezing all parameters except tuner.fc_var "
+            f"Phase 1 — freezing all parameters except variance_bottleneck / variance_tuner "
             f"for {freeze_epochs} epoch(s)."
         )
 
@@ -234,9 +260,9 @@ def train(model, train_loader, val_loader, hparams: dict) -> dict:
             )
 
         train_metrics = train_epoch(model, train_loader, optimizer, loss_fn, device,
-                                    uncertainty=uncertainty)
+                                    uncertainty=uncertainty, lambda_=lambda_)
         val_metrics   = eval_epoch(model, val_loader, loss_fn, device,
-                                   uncertainty=uncertainty)
+                                   uncertainty=uncertainty, lambda_=lambda_)
 
         record = {
             "epoch":      epoch,
@@ -245,6 +271,15 @@ def train(model, train_loader, val_loader, hparams: dict) -> dict:
             "val_loss":   val_metrics["loss"],
             "val_rmse":   val_metrics["rmse"],
         }
+        if uncertainty:
+            record.update({
+                "train_term1": train_metrics["term1"],
+                "train_term2": train_metrics["term2"],
+                "train_kl":    train_metrics["kl"],
+                "val_term1":   val_metrics["term1"],
+                "val_term2":   val_metrics["term2"],
+                "val_kl":      val_metrics["kl"],
+            })
         history.append(record)
 
         logger.info(
@@ -253,6 +288,12 @@ def train(model, train_loader, val_loader, hparams: dict) -> dict:
         logger.info(
             f"  Val   — loss: {val_metrics['loss']:.6f}  rmse: {val_metrics['rmse']:.6f}"
         )
+        if uncertainty:
+            logger.info(
+                f"  Val   — term1(λ·log_var): {val_metrics['term1']:.6f}"
+                f"  term2(res²/var): {val_metrics['term2']:.6f}"
+                f"  KL: {val_metrics['kl']:.6f}"
+            )
 
         if val_metrics["loss"] < best_val_loss:
             prev_best = best_val_loss
@@ -352,9 +393,9 @@ def build_parser() -> argparse.ArgumentParser:
     unc.add_argument(
         "--freeze-epochs", type=int, default=5,
         help=(
-            "Phase 1 length: number of epochs to train only the variance head "
-            "(fc_var) while all other parameters are frozen. "
-            "Only used when --uncertainty is set."
+            "Phase 1 length: number of epochs to train only the variance branch "
+            "(variance_bottleneck + variance_tuner) while all other parameters "
+            "are frozen. Only used when --uncertainty is set."
         ),
     )
     unc.add_argument(
@@ -362,6 +403,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Learning rate for phase 2 (full fine-tune). "
             "Defaults to lr / 10 if not set."
+        ),
+    )
+    unc.add_argument(
+        "--lambda", type=float, default=1.0, dest="lambda_",
+        help=(
+            "Weight on the log_var (uncertainty regularisation) term in the NLL loss. "
+            "Increase to encourage wider variance estimates; decrease to prioritise fit. "
+            "Only used when --uncertainty is set."
         ),
     )
 
@@ -476,6 +525,7 @@ def main() -> None:
         "uncertainty":    args.uncertainty,
         "freeze_epochs":  args.freeze_epochs,
         "lr_phase2":      args.lr_phase2 if args.lr_phase2 is not None else args.lr * 0.1,
+        "lambda_":        args.lambda_,
     }
     results = train(model, train_loader, val_loader, hparams)
 

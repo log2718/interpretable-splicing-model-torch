@@ -59,7 +59,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--temperature", type=float, default=None, help="RNAfold temperature in °C (required for rnafold stage)")
     p.add_argument("--left-flank",  type=str,  default=None, help="Override LEFT_FLANK (default: utils.LEFT_FLANK)")
     p.add_argument("--right-flank", type=str,  default=None, help="Override RIGHT_FLANK (default: utils.RIGHT_FLANK)")
-    p.add_argument("--no-batchnorm", action="store_true")
+    p.add_argument("--no-batchnorm",  action="store_true")
+    p.add_argument("--uncertainty",   action="store_true",
+                   help="Also output var_{config} from the variance head.")
     p.add_argument("--batch-size",   type=int, default=256)
     p.add_argument("--rnafold-bin",  type=str, default="RNAfold")
     p.add_argument("--device",       type=str, default=None)
@@ -96,7 +98,9 @@ def _predict_psi(
     use_batchnorm: bool,
     batch_size: int,
     device: torch.device,
-) -> np.ndarray:
+    uncertainty: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+    """Run inference. Returns preds, or (preds, vars) when uncertainty=True."""
     data     = np.load(npz_path)
     x_seq    = torch.as_tensor(data["seq_oh"])
     x_struct = torch.as_tensor(data["struct_oh"])
@@ -108,17 +112,25 @@ def _predict_psi(
     model.load_partial_state_dict(raw.get("model_state_dict", raw))
     model = model.to(device).eval()
 
-    preds = []
+    preds, vars_ = [], []
     with torch.no_grad():
         for start in tqdm(range(0, n, batch_size), desc="Inference", unit="batch"):
             end = min(start + batch_size, n)
-            logits = model(
-                x_seq[start:end].to(device),
-                x_struct[start:end].to(device),
-                x_wobble[start:end].to(device),
-                return_logits=True,
-            )
-            preds.append(torch.sigmoid(logits).cpu().numpy())
+            batch_seq    = x_seq[start:end].to(device)
+            batch_struct = x_struct[start:end].to(device)
+            batch_wobble = x_wobble[start:end].to(device)
+
+            if uncertainty:
+                logit_mu, _, var = model(batch_seq, batch_struct, batch_wobble,
+                                         return_logits=True, return_uncertainty=True)
+                preds.append(torch.sigmoid(logit_mu).cpu().numpy())
+                vars_.append(var.cpu().numpy())
+            else:
+                logits = model(batch_seq, batch_struct, batch_wobble, return_logits=True)
+                preds.append(torch.sigmoid(logits).cpu().numpy())
+
+    if uncertainty:
+        return np.concatenate(preds), np.concatenate(vars_)
     return np.concatenate(preds)
 
 
@@ -146,20 +158,34 @@ def main() -> None:
 
     # ── Stage 1: inference ────────────────────────────────────────────────────
     psi_col = f"predicted_PSI_{cfg}"
-    if run_inference and _needs_fill(df, psi_col, args.force):
+    var_col = f"var_{cfg}"
+    if run_inference and (_needs_fill(df, psi_col, args.force) or
+                          (args.uncertainty and _needs_fill(df, var_col, args.force))):
         if args.npz is None or args.checkpoint is None:
             raise ValueError("--npz and --checkpoint are required for the inference stage.")
-        print(f"\n[inference] Computing {psi_col} ...")
-        preds = _predict_psi(
+        print(f"\n[inference] Computing {psi_col}"
+              + (f", {var_col}" if args.uncertainty else "") + " ...")
+        result = _predict_psi(
             args.npz, args.checkpoint,
             use_batchnorm=not args.no_batchnorm,
             batch_size=args.batch_size,
             device=device,
+            uncertainty=args.uncertainty,
         )
+        if args.uncertainty:
+            preds, vars_ = result
+        else:
+            preds = result
+
         if len(preds) != len(df):
             raise ValueError(f"NPZ has {len(preds)} rows but CSV has {len(df)} rows.")
-        df[psi_col] = preds
-        print(f"  {psi_col}: mean={preds.mean():.4f}, std={preds.std():.4f}")
+
+        if _needs_fill(df, psi_col, args.force):
+            df[psi_col] = preds
+            print(f"  {psi_col}: mean={preds.mean():.4f}, std={preds.std():.4f}")
+        if args.uncertainty and _needs_fill(df, var_col, args.force):
+            df[var_col] = vars_
+            print(f"  {var_col}: mean={vars_.mean():.6f}, std={vars_.std():.6f}")
     elif run_inference:
         print(f"\n[inference] {psi_col} already present — skipping (use --force to overwrite)")
 
