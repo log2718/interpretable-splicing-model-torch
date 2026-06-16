@@ -8,16 +8,16 @@ sequences and extracts:
   - cofold_mfe : raw cofold MFE in kcal/mol
 
 Chunks (all fixed — only the exon varies per row):
-  up_dist  = LEFT_FLANK_150[  0: 50]   distal upstream,   100-150 nt from exon
+  up_far   = LEFT_FLANK_150[  0: 50]   far upstream,      100-150 nt from exon
   up_mid   = LEFT_FLANK_150[ 50:100]   middle upstream,    50-100 nt from exon
-  up_prox  = LEFT_FLANK_150[100:150]   proximal upstream,   0-50  nt from exon (3'SS)
+  up_near  = LEFT_FLANK_150[100:150]   near upstream,       0-50  nt from exon (3'SS)
   down     = RIGHT_FLANK_30 [  0: 30]  downstream,          0-30  nt from exon (5'SS)
 
 Output: data/test_rnacofold_interact.csv
 Columns: exon,
-         n_pairs_up_dist, mfe_up_dist,
+         n_pairs_up_far,  mfe_up_far,
          n_pairs_up_mid,  mfe_up_mid,
-         n_pairs_up_prox, mfe_up_prox,
+         n_pairs_up_near, mfe_up_near,
          n_pairs_down,    mfe_down
 
 Usage:
@@ -56,9 +56,9 @@ LEFT_FLANK_150 = (
 RIGHT_FLANK_30 = "CAGGTCTGACTATGGGACCCTTGATGTTTT"
 
 CHUNKS = {
-    "up_dist":  LEFT_FLANK_150[  0: 50],
+    "up_far":   LEFT_FLANK_150[  0: 50],
     "up_mid":   LEFT_FLANK_150[ 50:100],
-    "up_prox":  LEFT_FLANK_150[100:150],
+    "up_near":  LEFT_FLANK_150[100:150],
     "down":     RIGHT_FLANK_30[  0: 30],
 }
 
