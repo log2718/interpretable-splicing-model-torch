@@ -1,0 +1,15 @@
+Hostname: cs606.hpc.nyu.edu
+Starting at: Tue Jun 16 17:58:36 EDT 2026
+/ext3/miniforge3/bin/RNAcofold
+RNAcofold 2.7.2
+Loaded 47,962 exons from data/test_annotated.csv
+Chunks: ['up_far', 'up_mid', 'up_near', 'down'] ([50, 50, 50, 30] nt each)
+Temperature: 37.0°C   Workers: 16
+Total RNAcofold calls: 191,848
+
+Saved data/test_rnacofold_interact.csv  (47,962 rows, 9 cols)
+  n_pairs_up_far: mean=23.42  max=42  top2%_threshold=36
+  n_pairs_up_mid: mean=18.56  max=40  top2%_threshold=32
+  n_pairs_up_near: mean=9.21  max=40  top2%_threshold=25
+  n_pairs_down: mean=12.28  max=29  top2%_threshold=22
+Finished at: Tue Jun 16 18:01:25 EDT 2026
