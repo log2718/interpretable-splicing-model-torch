@@ -194,86 +194,82 @@ for title, entries in sections:
 COL_RATIOS  = [0.6, 1.5, 4]
 vmax_struct = max(np.abs(w_struct_incl).max(), np.abs(w_struct_skip).max())
 
-# Build flat row list across 4 sections
-# Each item: (height, row_type, payload)
-#   row_type: "title" | "seq" | "struct_logo" | "struct_heat" | "sep"
-all_rows = []
-for sec_idx, (sec_title, entries) in enumerate(sections):
-    if sec_idx > 0:
-        all_rows.append((0.35, "sep",        sec_title))
-    all_rows.append(    (0.5,  "title",      sec_title))
+
+def _build_section_rows(entries):
+    """Return flat row list for one section (no title row)."""
+    rows = []
     for e in entries:
         wt, ftype, fidx, kernel = e
         if ftype == "seq":
-            all_rows.append((3.0,  "seq",         e))
+            rows.append((3.0, "seq",         e))
         else:
-            all_rows.append((1.3,  "struct_logo",  e))
-            all_rows.append((2.8,  "struct_heat",  e))
+            rows.append((1.3, "struct_logo", e))
+            rows.append((2.8, "struct_heat", e))
+    return rows
 
-heights = [r[0] for r in all_rows]
-total_h = sum(heights) * 0.72 + 1.0
 
-fig4 = plt.figure(figsize=(14, total_h))
-gs4  = fig4.add_gridspec(len(all_rows), 3, height_ratios=heights,
-                         width_ratios=COL_RATIOS, hspace=0.12, wspace=0.25)
+def _draw_rows(fig, gs, rows):
+    for ri, (_, rtype, payload) in enumerate(rows):
+        wt, ftype, fidx, kernel = payload
 
-for ri, (_, rtype, payload) in enumerate(all_rows):
+        if rtype == "seq":
+            ax_lbl   = fig.add_subplot(gs[ri, 0])
+            ax_logo  = fig.add_subplot(gs[ri, 1])
+            ax_empty = fig.add_subplot(gs[ri, 2])
+            ax_lbl.axis("off"); ax_empty.axis("off")
+            ax_lbl.text(0.5, 0.5, f"filter {fidx}\nw={wt:+.3f}",
+                        ha="center", va="center", fontsize=8,
+                        transform=ax_lbl.transAxes)
+            df = pd.DataFrame(kernel.T, columns=NUCS)
+            logomaker.Logo(df, ax=ax_logo, color_scheme="classic",
+                           center_values=True, flip_below=True, vpad=0.05, width=0.9)
+            ax_logo.set_xticks([]); ax_logo.set_yticks([])
 
-    if rtype == "sep":
-        ax = fig4.add_subplot(gs4[ri, :])
-        ax.axhline(0.5, color="#cccccc", linewidth=1)
-        ax.axis("off")
-        continue
+        elif rtype == "struct_logo":
+            ax_lbl   = fig.add_subplot(gs[ri, 0])
+            ax_logo  = fig.add_subplot(gs[ri, 1])
+            ax_empty = fig.add_subplot(gs[ri, 2])
+            ax_lbl.axis("off"); ax_empty.axis("off")
+            ax_lbl.text(0.5, 0.5, f"filter {fidx}\nw={wt:+.3f}",
+                        ha="center", va="center", fontsize=8,
+                        transform=ax_lbl.transAxes)
+            df = pd.DataFrame(kernel[:4, :].T, columns=NUCS)
+            logomaker.Logo(df, ax=ax_logo, color_scheme="classic",
+                           center_values=True, flip_below=True, vpad=0.05, width=0.9)
+            ax_logo.set_xticks([]); ax_logo.set_yticks([])
 
-    if rtype == "title":
-        ax = fig4.add_subplot(gs4[ri, :])
-        ax.text(0.01, 0.5, payload, ha="left", va="center",
-                fontsize=10, fontweight="bold", color="#222222",
-                transform=ax.transAxes)
-        ax.axis("off")
-        continue
+        elif rtype == "struct_heat":
+            ax_lbl   = fig.add_subplot(gs[ri, 0])
+            ax_empty = fig.add_subplot(gs[ri, 1])
+            ax_heat  = fig.add_subplot(gs[ri, 2])
+            ax_lbl.axis("off"); ax_empty.axis("off")
+            im = ax_heat.imshow(kernel, aspect="auto", cmap="RdBu_r",
+                                vmin=-vmax_struct, vmax=vmax_struct)
+            ax_heat.set_yticks(range(8))
+            ax_heat.set_yticklabels(STRUCT_CHANS, fontsize=6)
+            ax_heat.set_xlabel("Position", fontsize=7)
+            plt.colorbar(im, ax=ax_heat, fraction=0.02, pad=0.02)
 
-    wt, ftype, fidx, kernel = payload
 
-    if rtype == "seq":
-        ax_lbl  = fig4.add_subplot(gs4[ri, 0])
-        ax_logo = fig4.add_subplot(gs4[ri, 1])
-        ax_empty = fig4.add_subplot(gs4[ri, 2])
-        ax_lbl.axis("off"); ax_empty.axis("off")
-        ax_lbl.text(0.5, 0.5, f"filter {fidx}\nw={wt:+.3f}",
-                    ha="center", va="center", fontsize=8,
-                    transform=ax_lbl.transAxes)
-        df = pd.DataFrame(kernel.T, columns=NUCS)
-        logomaker.Logo(df, ax=ax_logo, color_scheme="classic",
-                       center_values=True, flip_below=True, vpad=0.05, width=0.9)
-        ax_logo.set_xticks([]); ax_logo.set_yticks([])
+SEC_SLUGS = [
+    "seq_incl",
+    "seq_skip",
+    "struct_incl",
+    "struct_skip",
+]
 
-    elif rtype == "struct_logo":
-        ax_lbl  = fig4.add_subplot(gs4[ri, 0])
-        ax_logo = fig4.add_subplot(gs4[ri, 1])
-        ax_empty = fig4.add_subplot(gs4[ri, 2])
-        ax_lbl.axis("off"); ax_empty.axis("off")
-        ax_lbl.text(0.5, 0.5, f"filter {fidx}\nw={wt:+.3f}",
-                    ha="center", va="center", fontsize=8,
-                    transform=ax_lbl.transAxes)
-        df = pd.DataFrame(kernel[:4, :].T, columns=NUCS)
-        logomaker.Logo(df, ax=ax_logo, color_scheme="classic",
-                       center_values=True, flip_below=True, vpad=0.05, width=0.9)
-        ax_logo.set_xticks([]); ax_logo.set_yticks([])
+for (sec_title, entries), slug in zip(sections, SEC_SLUGS):
+    rows    = _build_section_rows(entries)
+    heights = [r[0] for r in rows]
+    total_h = sum(heights) * 0.72 + 1.2   # +1.2 for suptitle headroom
 
-    elif rtype == "struct_heat":
-        ax_lbl   = fig4.add_subplot(gs4[ri, 0])
-        ax_empty = fig4.add_subplot(gs4[ri, 1])
-        ax_heat  = fig4.add_subplot(gs4[ri, 2])
-        ax_lbl.axis("off"); ax_empty.axis("off")
-        im = ax_heat.imshow(kernel, aspect="auto", cmap="RdBu_r",
-                            vmin=-vmax_struct, vmax=vmax_struct)
-        ax_heat.set_yticks(range(8))
-        ax_heat.set_yticklabels(STRUCT_CHANS, fontsize=6)
-        ax_heat.set_xlabel("Position", fontsize=7)
-        plt.colorbar(im, ax=ax_heat, fraction=0.02, pad=0.02)
+    fig = plt.figure(figsize=(14, total_h))
+    gs  = fig.add_gridspec(len(rows), 3, height_ratios=heights,
+                           width_ratios=COL_RATIOS, hspace=0.12, wspace=0.25)
+    _draw_rows(fig, gs, rows)
+    fig.suptitle(sec_title, fontsize=12, fontweight="bold", y=1.0)
 
-p4 = OUT / "combined_filtered_weights.png"
-fig4.savefig(p4, dpi=150, bbox_inches="tight")
-plt.close()
-print(f"Saved {p4}")
+    out_path = OUT / f"combined_{slug}.png"
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved {out_path}")
