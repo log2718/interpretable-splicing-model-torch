@@ -1,0 +1,10 @@
+Hostname: cs609.hpc.nyu.edu
+Starting at: Tue Jun 23 17:01:19 EDT 2026
+/ext3/miniforge3/bin/RNAcofold
+RNAcofold 2.7.2
+Loaded 47,962 exons  |  split at position 35
+Temperature: 37.0°C   Workers: 16
+
+Saved data/test_rnacofold_intrinsic.csv  (47,962 rows)
+  n_pairs_intrinsic: mean=8.06  max=26  top2%_threshold=19
+Finished at: Tue Jun 23 17:01:48 EDT 2026
