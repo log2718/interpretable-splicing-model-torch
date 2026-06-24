@@ -36,7 +36,7 @@ singularity exec --nv \
       --lr-phase2 1e-4 \
       --lambda 1.0 \
       --l1-lambda 1e-3 \
-      --epochs 100 \
+      --epochs 200 \
       --patience 10 \
       --batch-size 256 \
       --seed 42 \
