@@ -443,6 +443,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Only used when --uncertainty is set."
         ),
     )
+    unc.add_argument(
+        "--l1-lambda", type=float, default=0.0, dest="l1_lambda",
+        help=(
+            "Weight on L1 activity regularization applied to post-softplus filter "
+            "activations (incl + skip). Encourages sparse filter usage so individual "
+            "filters learn cleaner, identifiable motifs. Start with 1e-4 to 1e-3."
+        ),
+    )
 
     run = parser.add_argument_group("runtime")
     run.add_argument(
@@ -556,6 +564,7 @@ def main() -> None:
         "freeze_epochs":  args.freeze_epochs,
         "lr_phase2":      args.lr_phase2 if args.lr_phase2 is not None else args.lr * 0.1,
         "lambda_":        args.lambda_,
+        "l1_lambda":      args.l1_lambda,
     }
     results = train(model, train_loader, val_loader, hparams)
 
