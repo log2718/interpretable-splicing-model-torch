@@ -52,25 +52,20 @@ def _count_intermolecular(struct_first: str) -> int:
     return max(depth, 0)
 
 
-_TEMPERATURE: float = 37.0
-_RNACOFOLD_BIN: str = "RNAcofold"
+_TEMPERATURE:    float = 37.0
+_RNACOFOLD_BIN:  str   = "RNAcofold"
+_RNADUPLEX_BIN:  str   = "RNAduplex"
 
 
-def _worker(exon: str) -> dict:
-    first = _to_rna(exon[:HALF])
-    second = _to_rna(exon[HALF:])
-    query = first + "&" + second
+def _run_rnacofold(first_rna: str, second_rna: str) -> tuple[int, float]:
+    query = first_rna + "&" + second_rna
     try:
         result = subprocess.run(
             [_RNACOFOLD_BIN, "--noPS", "-T", str(_TEMPERATURE)],
-            input=query + "\n",
-            text=True,
-            capture_output=True,
-            check=True,
+            input=query + "\n", text=True, capture_output=True, check=True,
         )
     except subprocess.CalledProcessError:
-        return {"exon": exon, "n_pairs_intrinsic": 0, "mfe_intrinsic": float("nan")}
-
+        return 0, float("nan")
     for line in result.stdout.splitlines():
         line = line.strip()
         if "&" in line and _STRUCT_RE.match(line):
@@ -78,26 +73,62 @@ def _worker(exon: str) -> dict:
             mfe = float(mfe_match.group(1)) if mfe_match else float("nan")
             tokens = line.rsplit(None, 1)
             struct_first = tokens[0].split("&")[0] if len(tokens) >= 1 else ""
-            n_pairs = _count_intermolecular(struct_first)
-            return {"exon": exon, "n_pairs_intrinsic": n_pairs, "mfe_intrinsic": mfe}
-
-    return {"exon": exon, "n_pairs_intrinsic": 0, "mfe_intrinsic": float("nan")}
+            return _count_intermolecular(struct_first), mfe
+    return 0, float("nan")
 
 
-def _init_worker(temperature: float, rnacofold_bin: str) -> None:
-    global _TEMPERATURE, _RNACOFOLD_BIN
-    _TEMPERATURE = temperature
+def _run_rnaduplex(first_rna: str, second_rna: str) -> tuple[int, float]:
+    query = f">s1\n{first_rna}\n>s2\n{second_rna}\n"
+    try:
+        result = subprocess.run(
+            [_RNADUPLEX_BIN, "-T", str(_TEMPERATURE)],
+            input=query, text=True, capture_output=True, check=True,
+        )
+    except subprocess.CalledProcessError:
+        return 0, float("nan")
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if "&" in line and _STRUCT_RE.match(line):
+            mfe_match = _MFE_RE.search(line)
+            mfe = float(mfe_match.group(1)) if mfe_match else float("nan")
+            struct_first = line.split("&")[0]
+            n_pairs = struct_first.count("(")
+            return n_pairs, mfe
+    return 0, float("nan")
+
+
+def _worker(exon: str) -> dict:
+    first  = _to_rna(exon[:HALF])
+    second = _to_rna(exon[HALF:])
+
+    n_cofold, mfe_cofold   = _run_rnacofold(first, second)
+    n_duplex, mfe_duplex   = _run_rnaduplex(first, second)
+
+    return {
+        "exon":               exon,
+        "n_pairs_intrinsic":  n_cofold,
+        "mfe_intrinsic":      mfe_cofold,
+        "n_pairs_rnaduplex":  n_duplex,
+        "mfe_rnaduplex":      mfe_duplex,
+    }
+
+
+def _init_worker(temperature: float, rnacofold_bin: str, rnaduplex_bin: str) -> None:
+    global _TEMPERATURE, _RNACOFOLD_BIN, _RNADUPLEX_BIN
+    _TEMPERATURE   = temperature
     _RNACOFOLD_BIN = rnacofold_bin
+    _RNADUPLEX_BIN = rnaduplex_bin
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument("--csv",           type=Path,  default=BASE / "data/test_annotated.csv")
-    p.add_argument("--out",           type=Path,  default=BASE / "data/test_rnacofold_intrinsic.csv")
-    p.add_argument("--workers",       type=int,   default=1)
-    p.add_argument("--temperature",   type=float, default=37.0)
-    p.add_argument("--rnacofold-bin", type=str,   default="RNAcofold")
-    p.add_argument("--force",         action="store_true")
+    p.add_argument("--csv",            type=Path,  default=BASE / "data/test_annotated.csv")
+    p.add_argument("--out",            type=Path,  default=BASE / "data/test_rnacofold_intrinsic.csv")
+    p.add_argument("--workers",        type=int,   default=1)
+    p.add_argument("--temperature",    type=float, default=37.0)
+    p.add_argument("--rnacofold-bin",  type=str,   default="RNAcofold")
+    p.add_argument("--rnaduplex-bin",  type=str,   default="RNAduplex")
+    p.add_argument("--force",          action="store_true")
     return p.parse_args()
 
 
@@ -118,13 +149,13 @@ def main() -> None:
         with Pool(
             processes=args.workers,
             initializer=_init_worker,
-            initargs=(args.temperature, args.rnacofold_bin),
+            initargs=(args.temperature, args.rnacofold_bin, args.rnaduplex_bin),
         ) as pool:
             for row in tqdm(pool.imap(_worker, exons, chunksize=32),
-                            total=len(exons), desc="RNAcofold intrinsic", unit="exon"):
+                            total=len(exons), desc="RNAcofold+RNAduplex intrinsic", unit="exon"):
                 rows.append(row)
     else:
-        _init_worker(args.temperature, args.rnacofold_bin)
+        _init_worker(args.temperature, args.rnacofold_bin, args.rnaduplex_bin)
         for exon in tqdm(exons, desc="RNAcofold intrinsic", unit="exon"):
             rows.append(_worker(exon))
 
@@ -133,10 +164,10 @@ def main() -> None:
     out_df.to_csv(args.out, index=False)
     print(f"\nSaved {args.out}  ({len(out_df):,} rows)")
 
-    col = "n_pairs_intrinsic"
-    v   = out_df[col]
-    print(f"  {col}: mean={v.mean():.2f}  max={v.max()}  "
-          f"top2%_threshold={v.quantile(0.98):.0f}")
+    for col in ["n_pairs_intrinsic", "mfe_intrinsic", "n_pairs_rnaduplex", "mfe_rnaduplex"]:
+        v = out_df[col]
+        print(f"  {col}: mean={v.mean():.2f}  min={v.min():.2f}  "
+              f"bottom2%={v.quantile(0.02):.2f}")
 
 
 if __name__ == "__main__":

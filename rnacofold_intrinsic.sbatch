@@ -30,7 +30,8 @@ singularity exec \
       --csv data/test_annotated.csv \
       --out data/test_rnacofold_intrinsic.csv \
       --workers 16 \
-      --temperature 37
+      --temperature 37 \
+      --force
   "
 
 echo "Finished at: $(date)"

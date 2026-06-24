@@ -83,45 +83,71 @@ def rmse(pred: torch.Tensor, target: torch.Tensor) -> float:
 # ── Per-epoch loops ───────────────────────────────────────────────────────────
 
 def train_epoch(model, loader, optimizer, loss_fn, device,
-                uncertainty: bool = False, lambda_: float = 1.0) -> dict:
+                uncertainty: bool = False, lambda_: float = 1.0,
+                l1_lambda: float = 0.0) -> dict:
     """One forward+backward pass over ``loader``. Returns loss, RMSE, and
-    (when uncertainty=True) per-term NLL components and mean KL divergence."""
+    (when uncertainty=True) per-term NLL components and mean KL divergence.
+
+    l1_lambda: weight on L1 activity regularization applied to the post-softplus
+    filter activations (energy_activation_incl + energy_activation_skip).
+    Encourages sparse filter usage, producing cleaner identifiable motifs.
+    """
     model.train()
-    total_loss = total_term1 = total_term2 = total_kl = 0.0
+    total_loss = total_term1 = total_term2 = total_kl = total_l1 = 0.0
     pred_list, target_list = [], []
 
-    pbar = tqdm(loader, desc="  train", leave=False, unit="batch")
-    for seq, struct, wobble, y in pbar:
-        seq    = seq.to(device, non_blocking=True)
-        struct = struct.to(device, non_blocking=True)
-        wobble = wobble.to(device, non_blocking=True)
-        y      = y.to(device, dtype=torch.float32, non_blocking=True)
+    # Register hooks to capture post-softplus filter activations for L1 reg
+    _act = [None, None]   # [incl, skip]
+    hooks = []
+    if l1_lambda > 0.0:
+        hooks.append(model.energy_activation_incl.register_forward_hook(
+            lambda m, inp, out: _act.__setitem__(0, out)
+        ))
+        hooks.append(model.energy_activation_skip.register_forward_hook(
+            lambda m, inp, out: _act.__setitem__(1, out)
+        ))
 
-        optimizer.zero_grad()
+    try:
+        pbar = tqdm(loader, desc="  train", leave=False, unit="batch")
+        for seq, struct, wobble, y in pbar:
+            seq    = seq.to(device, non_blocking=True)
+            struct = struct.to(device, non_blocking=True)
+            wobble = wobble.to(device, non_blocking=True)
+            y      = y.to(device, dtype=torch.float32, non_blocking=True)
 
-        if uncertainty:
-            logit_mu, log_var, var = model(seq, struct, wobble,
-                                           return_logits=True,
-                                           return_uncertainty=True)
-            pred_probs = torch.sigmoid(logit_mu)
-            loss, t1, t2 = gaussian_nll_logit(logit_mu, log_var, var, y, lambda_)
-            total_term1 += t1 * y.size(0)
-            total_term2 += t2 * y.size(0)
-            with torch.no_grad():
-                total_kl += kl_divergence_from_logits(logit_mu, y).item() * y.size(0)
-        else:
-            logits     = model(seq, struct, wobble, return_logits=True)
-            pred_probs = torch.sigmoid(logits)
-            loss       = loss_fn(logits, y)
+            optimizer.zero_grad()
 
-        loss.backward()
-        optimizer.step()
+            if uncertainty:
+                logit_mu, log_var, var = model(seq, struct, wobble,
+                                               return_logits=True,
+                                               return_uncertainty=True)
+                pred_probs = torch.sigmoid(logit_mu)
+                loss, t1, t2 = gaussian_nll_logit(logit_mu, log_var, var, y, lambda_)
+                total_term1 += t1 * y.size(0)
+                total_term2 += t2 * y.size(0)
+                with torch.no_grad():
+                    total_kl += kl_divergence_from_logits(logit_mu, y).item() * y.size(0)
+            else:
+                logits     = model(seq, struct, wobble, return_logits=True)
+                pred_probs = torch.sigmoid(logits)
+                loss       = loss_fn(logits, y)
 
-        total_loss += loss.item() * y.size(0)
-        pred_list.append(pred_probs.detach())
-        target_list.append(y.detach())
+            if l1_lambda > 0.0:
+                l1_reg = l1_lambda * (_act[0].mean() + _act[1].mean())
+                loss   = loss + l1_reg
+                total_l1 += l1_reg.item() * y.size(0)
 
-        pbar.set_postfix(batch_loss=f"{loss.item():.5f}")
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item() * y.size(0)
+            pred_list.append(pred_probs.detach())
+            target_list.append(y.detach())
+
+            pbar.set_postfix(batch_loss=f"{loss.item():.5f}")
+    finally:
+        for h in hooks:
+            h.remove()
 
     n     = len(loader.dataset)
     preds = torch.cat(pred_list)
@@ -131,6 +157,8 @@ def train_epoch(model, loader, optimizer, loss_fn, device,
         out["term1"] = total_term1 / n
         out["term2"] = total_term2 / n
         out["kl"]    = total_kl    / n
+    if l1_lambda > 0.0:
+        out["l1"] = total_l1 / n
     return out
 
 
@@ -207,6 +235,7 @@ def train(model, train_loader, val_loader, hparams: dict) -> dict:
     uncertainty    = hparams.get("uncertainty", False)
     freeze_epochs  = hparams.get("freeze_epochs", 0)
     lambda_        = hparams.get("lambda_", 1.0)
+    l1_lambda      = hparams.get("l1_lambda", 0.0)
 
     model = model.to(device)
 
@@ -260,7 +289,8 @@ def train(model, train_loader, val_loader, hparams: dict) -> dict:
             )
 
         train_metrics = train_epoch(model, train_loader, optimizer, loss_fn, device,
-                                    uncertainty=uncertainty, lambda_=lambda_)
+                                    uncertainty=uncertainty, lambda_=lambda_,
+                                    l1_lambda=l1_lambda)
         val_metrics   = eval_epoch(model, val_loader, loss_fn, device,
                                    uncertainty=uncertainty, lambda_=lambda_)
 
