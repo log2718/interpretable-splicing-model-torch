@@ -1,0 +1,6 @@
+Hostname: cs608.hpc.nyu.edu
+Starting at: Wed Jun 24 18:07:54 EDT 2026
+/ext3/miniforge3/bin/RNAcofold
+RNAcofold 2.7.2
+data/test_rnacofold_intrinsic.csv already exists — skipping (use --force to recompute).
+Finished at: Wed Jun 24 18:07:57 EDT 2026
