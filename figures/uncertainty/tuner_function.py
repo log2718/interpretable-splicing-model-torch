@@ -13,7 +13,7 @@ sys.path.insert(0, str(BASE))
 from model import PNASModel
 
 OUT  = Path(__file__).resolve().parent
-CKPT = BASE / "checkpoints/flank_150_30_uncertainty/best_model_20260613_171626.pt"
+CKPT = BASE / "checkpoints/flank_150_30_uncertainty/best_model_20260624_193658.pt"
 
 # Observed z ranges (collected via forward hook on variance_bottleneck)
 Z_MIN_TRAIN, Z_MAX_TRAIN = -1.415, -0.731

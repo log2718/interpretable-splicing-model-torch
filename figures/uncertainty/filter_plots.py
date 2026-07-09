@@ -22,7 +22,7 @@ sys.path.insert(0, str(BASE))
 from model import PNASModel
 
 OUT  = Path(__file__).resolve().parent
-CKPT = BASE / "checkpoints/flank_150_30_uncertainty/best_model_20260613_171626.pt"
+CKPT = BASE / "checkpoints/flank_150_30_uncertainty/best_model_20260624_193658.pt"
 
 # ── Load weights ───────────────────────────────────────────────────────────────
 ckpt = torch.load(CKPT, map_location="cpu", weights_only=False)
@@ -38,30 +38,61 @@ w_struct_skip = sd["conv_struct_skip.weight"].detach().numpy()      # (8, 8, 30)
 NUCS         = ["A", "C", "G", "T"]
 STRUCT_CHANS = ["A", "C", "G", "T", "unpaired (.)", "open pair (", "close pair )", "wobble (GU)"]
 
+# ── Compute mean activations via forward hook ──────────────────────────────────
+# contribution_i = w_i * mean(h_i)  — the actual average push of filter i on z
+
+NPZ  = BASE / "data/test_flank_150_30.npz"
+data = np.load(NPZ)
+
+model = PNASModel(input_length=250, use_batchnorm=False)
+model.load_state_dict(sd)
+model.eval()
+
+from torch.utils.data import DataLoader, TensorDataset
+
+x_seq    = torch.tensor(data["seq_oh"],  dtype=torch.float32)
+x_struct = torch.tensor(data["struct_oh"], dtype=torch.float32)
+x_wob    = torch.tensor(data["wobbles"],   dtype=torch.float32)
+loader   = DataLoader(TensorDataset(x_seq, x_struct, x_wob), batch_size=512)
+
+h_all = []
+hook  = model.variance_bottleneck.register_forward_hook(
+    lambda m, inp, out: h_all.append(inp[0].detach().cpu())
+)
+with torch.no_grad():
+    for seq, struct, wob in loader:
+        model(seq, struct, wob, return_uncertainty=True)
+hook.remove()
+
+h_mean        = torch.cat(h_all).mean(dim=0).numpy()   # (56,) mean activation per filter
+contributions = w_bottleneck * h_mean                   # actual contribution to z
+print(f"h_mean range: [{h_mean.min():.4f}, {h_mean.max():.4f}]")
+print(f"contributions range: [{contributions.min():.4f}, {contributions.max():.4f}]")
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Fig 1 — Bottleneck weights: 4 subplots
 # ══════════════════════════════════════════════════════════════════════════════
 
 segments = [
-    ("Inclusion seq  (filters 0–19)",   w_bottleneck[ 0:20], "#2166ac"),
-    ("Inclusion struct  (filters 20–27)", w_bottleneck[20:28], "#4dac26"),
-    ("Skipping seq  (filters 28–47)",   w_bottleneck[28:48], "#d6604d"),
-    ("Skipping struct  (filters 48–55)", w_bottleneck[48:56], "#f4a582"),
+    ("Inclusion seq  (filters 0–19)",    contributions[ 0:20], w_bottleneck[ 0:20], "#2166ac"),
+    ("Inclusion struct  (filters 20–27)", contributions[20:28], w_bottleneck[20:28], "#4dac26"),
+    ("Skipping seq  (filters 28–47)",    contributions[28:48], w_bottleneck[28:48], "#d6604d"),
+    ("Skipping struct  (filters 48–55)", contributions[48:56], w_bottleneck[48:56], "#f4a582"),
 ]
 
 fig1, axes1 = plt.subplots(1, 4, figsize=(16, 4), sharey=False)
-for ax, (title, weights, color) in zip(axes1, segments):
-    x = np.arange(len(weights))
-    colors = [color if v >= 0 else "#888888" for v in weights]
-    ax.bar(x, weights, color=colors, width=0.7)
+for ax, (title, contribs, weights, color) in zip(axes1, segments):
+    x = np.arange(len(contribs))
+    colors = [color if v >= 0 else "#888888" for v in contribs]
+    ax.bar(x, contribs, color=colors, width=0.7)
     ax.axhline(0, color="black", linewidth=0.6)
     ax.set_title(title, fontsize=9)
     ax.set_xlabel("Filter index", fontsize=8)
-    ax.set_ylabel("Bottleneck weight", fontsize=8)
+    ax.set_ylabel("Contribution (w × mean activation)", fontsize=8)
     ax.set_xticks(x)
     ax.set_xticklabels(x, fontsize=7)
 
-fig1.suptitle("Variance bottleneck weights  Linear(56→1)", fontsize=11)
+fig1.suptitle("Variance bottleneck contributions  (mean activation × weight)", fontsize=11)
 fig1.tight_layout()
 p1 = OUT / "bottleneck_weights_4panel.png"
 fig1.savefig(p1, dpi=150, bbox_inches="tight")
@@ -165,21 +196,22 @@ plot_struct_heatmaps(w_struct_skip,
 # Fig 4 — Combined: filters with |bottleneck weight| > 0.05, sorted descending
 # ══════════════════════════════════════════════════════════════════════════════
 
-THRESH = 0.05
+THRESH = 0.01   # threshold on |contribution| not raw weight
 
-def _collect(w_bn_slice, kernels, ftype):
-    """Return list of (weight, ftype, local_idx, kernel) with |w|>THRESH, sorted by |w| desc."""
+def _collect(contrib_slice, w_slice, kernels, ftype):
+    """Return list of (contribution, weight, ftype, local_idx, kernel)
+    with |contribution|>THRESH, sorted by |contribution| desc."""
     entries = []
-    for i, wt in enumerate(w_bn_slice):
-        if abs(wt) > THRESH:
-            entries.append((wt, ftype, i, kernels[i]))
+    for i, (ct, wt) in enumerate(zip(contrib_slice, w_slice)):
+        if abs(ct) > THRESH:
+            entries.append((ct, wt, ftype, i, kernels[i]))
     entries.sort(key=lambda x: -abs(x[0]))
     return entries
 
-seq_incl_entries    = _collect(w_bottleneck[ 0:20], w_seq_incl,    "seq")
-seq_skip_entries    = _collect(w_bottleneck[28:48], w_seq_skip,    "seq")
-struct_incl_entries = _collect(w_bottleneck[20:28], w_struct_incl, "struct")
-struct_skip_entries = _collect(w_bottleneck[48:56], w_struct_skip, "struct")
+seq_incl_entries    = _collect(contributions[ 0:20], w_bottleneck[ 0:20], w_seq_incl,    "seq")
+seq_skip_entries    = _collect(contributions[28:48], w_bottleneck[28:48], w_seq_skip,    "seq")
+struct_incl_entries = _collect(contributions[20:28], w_bottleneck[20:28], w_struct_incl, "struct")
+struct_skip_entries = _collect(contributions[48:56], w_bottleneck[48:56], w_struct_skip, "struct")
 
 sections = [
     ("Sequence filters — inclusion",  seq_incl_entries),
@@ -199,7 +231,7 @@ def _build_section_rows(entries):
     """Return flat row list for one section (no title row)."""
     rows = []
     for e in entries:
-        wt, ftype, fidx, kernel = e
+        ct, wt, ftype, fidx, kernel = e
         if ftype == "seq":
             rows.append((3.0, "seq",         e))
         else:
@@ -210,15 +242,16 @@ def _build_section_rows(entries):
 
 def _draw_rows(fig, gs, rows):
     for ri, (_, rtype, payload) in enumerate(rows):
-        wt, ftype, fidx, kernel = payload
+        ct, wt, ftype, fidx, kernel = payload
+        lbl_text = f"filter {fidx}\ncontrib={ct:+.3f}\nw={wt:+.3f}"
 
         if rtype == "seq":
             ax_lbl   = fig.add_subplot(gs[ri, 0])
             ax_logo  = fig.add_subplot(gs[ri, 1])
             ax_empty = fig.add_subplot(gs[ri, 2])
             ax_lbl.axis("off"); ax_empty.axis("off")
-            ax_lbl.text(0.5, 0.5, f"filter {fidx}\nw={wt:+.3f}",
-                        ha="center", va="center", fontsize=8,
+            ax_lbl.text(0.5, 0.5, lbl_text,
+                        ha="center", va="center", fontsize=7,
                         transform=ax_lbl.transAxes)
             df = pd.DataFrame(kernel.T, columns=NUCS)
             logomaker.Logo(df, ax=ax_logo, color_scheme="classic",
@@ -230,8 +263,8 @@ def _draw_rows(fig, gs, rows):
             ax_logo  = fig.add_subplot(gs[ri, 1])
             ax_empty = fig.add_subplot(gs[ri, 2])
             ax_lbl.axis("off"); ax_empty.axis("off")
-            ax_lbl.text(0.5, 0.5, f"filter {fidx}\nw={wt:+.3f}",
-                        ha="center", va="center", fontsize=8,
+            ax_lbl.text(0.5, 0.5, lbl_text,
+                        ha="center", va="center", fontsize=7,
                         transform=ax_lbl.transAxes)
             df = pd.DataFrame(kernel[:4, :].T, columns=NUCS)
             logomaker.Logo(df, ax=ax_logo, color_scheme="classic",
@@ -251,6 +284,50 @@ def _draw_rows(fig, gs, rows):
             plt.colorbar(im, ax=ax_heat, fraction=0.02, pad=0.02)
 
 
+def _save_seq_2col(sec_title, entries, out_path):
+    """Seq filters in 2 columns: left = top half (higher contribution), right = lower half."""
+    import math
+    n_left  = math.ceil(len(entries) / 2)
+    left    = entries[:n_left]
+    right   = entries[n_left:]
+    n_rows  = n_left   # left col is always >= right col
+
+    ROW_H   = 3.0
+    total_h = n_rows * ROW_H * 0.72 + 1.2
+    # widths: [lbl_L, logo_L, gap, lbl_R, logo_R]
+    fig = plt.figure(figsize=(12, total_h))
+    gs  = fig.add_gridspec(n_rows, 5,
+                           height_ratios=[ROW_H] * n_rows,
+                           width_ratios=[0.5, 2.0, 0.2, 0.5, 2.0],
+                           hspace=0.12, wspace=0.15)
+
+    def _draw_seq(col_entries, lbl_col, logo_col):
+        for ri, e in enumerate(col_entries):
+            ct, wt, ftype, fidx, kernel = e
+            ax_lbl  = fig.add_subplot(gs[ri, lbl_col])
+            ax_logo = fig.add_subplot(gs[ri, logo_col])
+            ax_lbl.axis("off")
+            ax_lbl.text(0.5, 0.5, f"filter {fidx}\ncontrib={ct:+.3f}\nw={wt:+.3f}",
+                        ha="center", va="center", fontsize=7,
+                        transform=ax_lbl.transAxes)
+            df = pd.DataFrame(kernel.T, columns=NUCS)
+            logomaker.Logo(df, ax=ax_logo, color_scheme="classic",
+                           center_values=True, flip_below=True, vpad=0.05, width=0.9)
+            ax_logo.set_xticks([]); ax_logo.set_yticks([])
+
+    _draw_seq(left,  lbl_col=0, logo_col=1)
+    _draw_seq(right, lbl_col=3, logo_col=4)
+
+    # blank gap col
+    for ri in range(n_rows):
+        ax = fig.add_subplot(gs[ri, 2]); ax.axis("off")
+
+    fig.suptitle(sec_title, fontsize=12, fontweight="bold", y=1.0)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved {out_path}")
+
+
 SEC_SLUGS = [
     "seq_incl",
     "seq_skip",
@@ -259,17 +336,20 @@ SEC_SLUGS = [
 ]
 
 for (sec_title, entries), slug in zip(sections, SEC_SLUGS):
-    rows    = _build_section_rows(entries)
-    heights = [r[0] for r in rows]
-    total_h = sum(heights) * 0.72 + 1.2   # +1.2 for suptitle headroom
-
-    fig = plt.figure(figsize=(14, total_h))
-    gs  = fig.add_gridspec(len(rows), 3, height_ratios=heights,
-                           width_ratios=COL_RATIOS, hspace=0.12, wspace=0.25)
-    _draw_rows(fig, gs, rows)
-    fig.suptitle(sec_title, fontsize=12, fontweight="bold", y=1.0)
-
     out_path = OUT / f"combined_{slug}.png"
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
-    plt.close()
-    print(f"Saved {out_path}")
+
+    if slug.startswith("seq"):
+        _save_seq_2col(sec_title, entries, out_path)
+    else:
+        rows    = _build_section_rows(entries)
+        heights = [r[0] for r in rows]
+        total_h = sum(heights) * 0.72 + 1.2
+
+        fig = plt.figure(figsize=(14, total_h))
+        gs  = fig.add_gridspec(len(rows), 3, height_ratios=heights,
+                               width_ratios=COL_RATIOS, hspace=0.12, wspace=0.25)
+        _draw_rows(fig, gs, rows)
+        fig.suptitle(sec_title, fontsize=12, fontweight="bold", y=1.0)
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close()
+        print(f"Saved {out_path}")
