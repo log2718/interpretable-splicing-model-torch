@@ -1,0 +1,21 @@
+++ hostname
++ echo 'Hostname: cs747.hpc.nyu.edu'
+++ date
++ echo 'Starting at: Thu Jul  9 15:39:13 EDT 2026'
++ cd /scratch/yl12316/interpretable-splicing-model-torch
++ singularity exec --nv --overlay /scratch/yl12316/my_project/overlay-15GB-500K.ext3:ro /share/apps/images/cuda13.0.1-cudnn9.13.0-ubuntu-24.04.3.sif /bin/bash -c '
+    source /ext3/env.sh
+
+    cd /scratch/yl12316/interpretable-splicing-model-torch
+
+    python performance/rnaduplex_shuffle_multiseed.py       --chunks         ss3:left:127:150         up_near:left:100:150         up_mid:left:60:110         up_far:left:20:70         upstream_exon:upstream_exon:0:116         downstream_short:right:0:100         downstream_long:downstream_long:0:250         downstream_exon:downstream_exon:0:141       --n-seeds 10       --seed-start 42       --out data/test_rnaduplex_redesigned_multiseed.csv       --workers 16       --force
+  '
+Traceback (most recent call last):
+  File "/scratch/yl12316/interpretable-splicing-model-torch/performance/rnaduplex_shuffle_multiseed.py", line 186, in <module>
+    main()
+    ~~~~^^
+  File "/scratch/yl12316/interpretable-splicing-model-torch/performance/rnaduplex_shuffle_multiseed.py", line 144, in main
+    chunks = _parse_chunks(args.chunks)
+  File "/scratch/yl12316/interpretable-splicing-model-torch/performance/rnaduplex_shuffle_multiseed.py", line 116, in _parse_chunks
+    raise ValueError(f"flank must be one of {list(_FLANKS)}, got '{flank}'")
+ValueError: flank must be one of ['left', 'right', 'upstream_exon'], got 'downstream_long'
