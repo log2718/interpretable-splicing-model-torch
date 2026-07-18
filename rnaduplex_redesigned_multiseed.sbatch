@@ -26,17 +26,18 @@ singularity exec --nv \
 
     python performance/rnaduplex_shuffle_multiseed.py \
       --chunks \
-        ss3:left:127:150 \
-        up_near:left:100:150 \
-        up_mid:left:60:110 \
-        up_far:left:20:70 \
+        ss3:left:107:130 \
+        up_near:left:80:130 \
+        up_mid:left:40:90 \
+        up_far:left:0:50 \
+        up_total:left:0:130 \
         upstream_exon:upstream_exon:0:116 \
         downstream_short:right:0:100 \
         downstream_long:downstream_long:0:250 \
         downstream_exon:downstream_exon:0:141 \
-      --n-seeds 10 \
+      --n-seeds 100 \
       --seed-start 42 \
-      --out data/test_rnaduplex_redesigned_multiseed.csv \
+      --out data/test_rnaduplex_redesigned_multiseed_100.csv \
       --workers 16 \
       --force
   "
