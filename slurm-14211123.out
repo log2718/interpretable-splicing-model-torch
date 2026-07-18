@@ -1,0 +1,10 @@
+Exon portion : whole
+Chunks       :
+  up_total        (130 nt)  GTTGGTATCAAGGTTACAAGACAGGTTTAAGGAGACCAATAGAAACTGGGCATATGGAGACAGAGAAGACTCTTGGGTTTCTGATAGGCACTGACTCTCTCTGCCTATGTCTTTCTCTGCCATCCAGGTT
+
+Loaded 47,962 exons
+Temperature: 37.0°C   Workers: 16
+Total RNAduplex calls: 47,962
+
+Saved data/test_rnaduplex_up_total.csv  (47,962 rows, 3 cols)
+  mfe_up_total: mean=-30.51  min=-58.70  bottom2%=-42.50
