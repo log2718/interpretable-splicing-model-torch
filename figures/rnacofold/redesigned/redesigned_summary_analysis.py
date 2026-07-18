@@ -142,3 +142,84 @@ p_out = OUT / "redesigned_summary_pvals.png"
 fig.savefig(p_out, dpi=150, bbox_inches="tight")
 plt.close()
 print(f"Saved {p_out.name}")
+
+# ── P-value table (CLI + PNG) ──────────────────────────────────────────────────
+
+ms_table_df = pd.DataFrame(shuffle_rows) if shuffle_rows else None
+
+row_labels = ["real"] + [f"seed {SEED_START + i}" for i in range(N_SEEDS)]
+
+for stat, stat_label in [("p_mean",   "t-test (mean residual)"),
+                          ("p_levene", "Levene (variance)")]:
+    # Build 11 × 8 matrix
+    real_row = [r[stat] for r in real_rows]
+    shuf_rows = []
+    if ms_table_df is not None:
+        for i in range(N_SEEDS):
+            seed = SEED_START + i
+            shuf_rows.append([
+                ms_table_df[(ms_table_df["chunk"] == c) &
+                            (ms_table_df["seed"]  == seed)][stat].values[0]
+                for c in CHUNKS
+            ])
+    mat = np.array([real_row] + shuf_rows)   # (11, 8)
+
+    # ── CLI print ──────────────────────────────────────────────────────────────
+    SIG = "\033[1;31m"   # bold red
+    RST = "\033[0m"
+    col_w = 13
+    print(f"\n{stat_label}")
+    print(f"{'':>10}" + "".join(f"{c:>{col_w}}" for c in CHUNKS))
+    for ri, rl in enumerate(row_labels):
+        cells = ""
+        for v in mat[ri]:
+            s = f"{v:.2e}"
+            cells += (SIG + f"{s:>{col_w}}" + RST) if v < 0.05 else f"{s:>{col_w}}"
+        print(f"{rl:>10}{cells}")
+
+    if ms_table_df is None:
+        continue
+
+    # ── PNG table ──────────────────────────────────────────────────────────────
+    cell_text   = [[f"{v:.2e}" for v in row] for row in mat]
+    cell_colors = []
+    for ri, row in enumerate(mat):
+        row_colors = []
+        for v in row:
+            if ri == 0:
+                row_colors.append("#ea9999" if v < 0.05 else "white")  # real row
+            else:
+                row_colors.append("#ea9999" if v < 0.05 else "white")  # shuffle rows
+        cell_colors.append(row_colors)
+
+    col_labels = [c.replace("_", "\n") for c in CHUNKS]
+    fig_t, ax_t = plt.subplots(figsize=(18 / 2.54, 8 / 2.54))
+    ax_t.axis("off")
+    tbl = ax_t.table(
+        cellText=cell_text,
+        rowLabels=row_labels,
+        colLabels=col_labels,
+        cellColours=cell_colors,
+        loc="center",
+        cellLoc="center",
+    )
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(6)
+    tbl.auto_set_column_width(list(range(-1, len(CHUNKS))))
+    tbl.scale(1.0, 1.3)
+    for j in range(len(CHUNKS)):               # bold column headers
+        tbl[0, j].set_text_props(fontweight="bold")
+    for i in range(len(row_labels)):           # bold row labels
+        tbl[i + 1, -1].set_text_props(fontweight="bold")
+    for j in range(len(CHUNKS)):               # bold real row cells
+        tbl[1, j].set_text_props(fontweight="bold")
+    tbl[1, -1].set_text_props(fontweight="bold")  # bold real row label
+    ax_t.set_title(
+        f"RNAduplex p-values — {stat_label} (red = significant)",
+        fontsize=7, pad=8,
+    )
+    fig_t.tight_layout(pad=0.3)
+    p_tbl = OUT / f"redesigned_pvalue_table_{stat}.png"
+    fig_t.savefig(p_tbl, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved {p_tbl.name}")
