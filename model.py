@@ -407,6 +407,61 @@ class PNASModel(nn.Module):
 
         return a_incl, a_skip
 
+    def compute_structure_activations(
+        self,
+        x_seq,
+        x_struct,
+        x_wobble,
+        agg='mean',
+    ):
+        """Summarize structure filter activations for inclusion and skipping.
+
+        This applies the same structure-input concatenation, convolutions,
+        position biases, crop, and softplus activation used by :meth:`forward`.
+
+        Args:
+            x_seq: Sequence tensor of shape ``(batch_size, 4, input_length)``.
+            x_struct: Structure tensor of shape
+                ``(batch_size, 3, input_length)``.
+            x_wobble: Wobble tensor of shape
+                ``(batch_size, 1, input_length)``.
+            agg: Aggregation to apply over the sequence axis. Supported values
+                are ``"mean"`` and ``"sum"``.
+
+        Returns:
+            A tuple ``(a_incl, a_skip)`` where each tensor has shape
+            ``(batch_size, 8)`` after aggregation.
+
+        Raises:
+            ValueError: If ``agg`` is not supported.
+        """
+        struct_input = torch.cat([x_seq, x_struct, x_wobble], dim=1)
+        conv_skip_out = (
+            self.conv_struct_skip(struct_input)
+            + self.position_bias_skip_struct.unsqueeze(0)
+        )
+        conv_incl_out = (
+            self.conv_struct_incl(struct_input)
+            + self.position_bias_incl_struct.unsqueeze(0)
+        )
+
+        # Match the sequence convolution's valid output length, as in forward.
+        conv_skip_out = conv_skip_out[:, :, 2:-3]
+        conv_incl_out = conv_incl_out[:, :, 2:-3]
+        a_skip = self.energy_activation_skip(conv_skip_out)
+        a_incl = self.energy_activation_incl(conv_incl_out)
+
+        if agg == 'mean':
+            a_incl = torch.mean(a_incl, dim=2)
+            a_skip = torch.mean(a_skip, dim=2)
+        elif agg == 'sum':
+            a_incl = torch.sum(a_incl, dim=2)
+            a_skip = torch.sum(a_skip, dim=2)
+        else:
+            raise ValueError(f"Unknown aggregation: {agg}")
+
+        return a_incl, a_skip
+
     def compute_sr_balance(self, x_seq, agg='mean'):
         """Compute the net inclusion-minus-skipping sequence score.
 
