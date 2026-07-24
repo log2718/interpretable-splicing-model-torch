@@ -35,7 +35,7 @@ df = df[
 df["signed_residual"] = df["predicted_PSI_flank_150_30_unc"] - df["PSI"]
 print(f"{len(df):,} exons with complete data")
 
-CHUNKS = ["ss3", "up_near", "up_mid", "up_far",
+CHUNKS = ["ss3", "up_near", "up_mid", "up_far", "up_total",
           "upstream_exon",
           "downstream_short", "downstream_long", "downstream_exon"]
 COLORS = ["#92c5de", "#d6604d"]

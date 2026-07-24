@@ -1,6 +1,7 @@
 # large csv files
 data/test_flank_150_30.csv
 data/train_flank_150_30.csv
+data/test_rnaduplex_redesigned_multiseed_100.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

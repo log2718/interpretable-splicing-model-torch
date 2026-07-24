@@ -56,12 +56,15 @@ for label, act in [("incl", act_incl), ("skip", act_skip)]:
         vals = act[:, fi]
         ax.hist(vals, bins=50, color="#4393c3" if label == "incl" else "#d6604d",
                 alpha=0.75, edgecolor="none")
+        ax.set_yscale("log")
+        ax.set_ylim(bottom=1)
+        ax.set_xlim(0, 2.0 if label == "incl" else 2.5)
         frac_zero = (vals < 0.01).mean()
         ax.set_title(f"Filter {fi}  (zero={frac_zero:.0%})", fontsize=8)
         ax.set_xlabel("Activation", fontsize=7)
         ax.tick_params(labelsize=7)
-    fig.suptitle(f"6-mer activation distributions — seq filters ({label})\n"
-                 f"(zero = fraction of 6-mers with activation < 0.01)",
+    long_label = "inclusion" if label == "incl" else "skipping"
+    fig.suptitle(f"Activations with log y-axis — {long_label}",
                  fontsize=10, y=1.02)
     fig.tight_layout()
     p = OUT / f"kmer_activation_hist_{label}.png"
@@ -130,6 +133,7 @@ for label, act in [("incl", act_incl), ("skip", act_skip)]:
             logomaker.Logo(df, ax=ax, **LOGO_OPTS)
         except Exception:
             ax.axis("off")
+        ax.set_ylim(0, 2)
         ax.set_title(f"Filter {fi}  (n={s['n_active']})", fontsize=7)
         ax.set_xticks(range(6))
         ax.set_xticklabels(range(1, 7), fontsize=6)

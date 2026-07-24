@@ -24,11 +24,11 @@ BASE = Path(__file__).resolve().parent.parent.parent.parent
 OUT  = Path(__file__).resolve().parent
 OUT.mkdir(parents=True, exist_ok=True)
 
-CHUNKS = ["ss3", "up_near", "up_mid", "up_far",
+CHUNKS = ["ss3", "up_near", "up_mid", "up_far", "up_total",
           "upstream_exon",
           "downstream_short", "downstream_long", "downstream_exon"]
 
-N_SEEDS    = 10
+N_SEEDS    = 100
 SEED_START = 42
 
 
@@ -68,7 +68,7 @@ real_table = pd.DataFrame(real_rows)
 
 # ── Shuffle p-values (only if multiseed CSV exists) ───────────────────────────
 
-ms_path = BASE / "data/test_rnaduplex_redesigned_multiseed.csv"
+ms_path = BASE / "data/test_rnaduplex_redesigned_multiseed_100.csv"
 shuffle_rows = []
 
 if ms_path.exists():
@@ -119,7 +119,7 @@ for ax_i, (stat, title) in enumerate([("p_mean",   "Mean residual PSI (t-test)")
             ps = ms_table[ms_table["chunk"] == chunk][stat].values
             ax.scatter(np.full(len(ps), ci), -np.log10(ps),
                        color="#aaaaaa", s=30, alpha=0.7, zorder=3,
-                       label="Shuffled (seeds 42–51)" if ci == 0 else "")
+                       label=f"Shuffled (seeds {SEED_START}–{SEED_START+N_SEEDS-1})" if ci == 0 else "")
 
     # Real p-values
     real_ps = [-np.log10(r[stat]) for r in real_rows]
@@ -134,8 +134,8 @@ for ax_i, (stat, title) in enumerate([("p_mean",   "Mean residual PSI (t-test)")
     ax.set_title(title, fontsize=10)
     ax.legend(fontsize=8)
 
-fig.suptitle("RNAduplex redesigned chunks — real vs shuffled (10 seeds 42–51)\n"
-             "red star = real sequence; grey dots = mononucleotide shuffles",
+fig.suptitle("RNAduplex shuffle vs original sequence residuals\n"
+             f"red star = real sequence; grey dots = {N_SEEDS} mononucleotide shuffles (seeds {SEED_START}–{SEED_START+N_SEEDS-1})",
              fontsize=10, y=1.02)
 fig.tight_layout()
 p_out = OUT / "redesigned_summary_pvals.png"
