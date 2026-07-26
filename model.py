@@ -34,15 +34,22 @@ def lanczos_interpolate(arr, positions, order=3):
     Returns:
         A NumPy array containing interpolated values for each input position.
     """
-    result = np.zeros_like(positions)
-    # Written this way to support non-scalar x.
-    for i, x in enumerate(positions):
-        i_min, i_max = int(np.floor(x) - order +1), int(np.floor(x) + order + 1)
-        i_min, i_max = max(i_min, 0), min(i_max, len(arr))
-        window = np.arange(i_min, i_max)
-        result[i] = np.sum(arr[window] * lanczos_kernel(x - window, order))
+    positions = np.asarray(positions)
+    if positions.size == 0:
+        return np.zeros_like(positions)
 
-    return result
+    # Evaluate the same 2 * order sample window for every target position at
+    # once. Out-of-bounds samples are clipped for indexing and then masked out,
+    # preserving the edge behavior of the original per-position loop.
+    offsets = np.arange(-order + 1, order + 1)
+    sample_indices = np.floor(positions).astype(np.int64)[:, None] + offsets
+    valid = (sample_indices >= 0) & (sample_indices < len(arr))
+    clipped_indices = np.clip(sample_indices, 0, len(arr) - 1)
+    weights = lanczos_kernel(
+        positions[:, None] - sample_indices,
+        order,
+    ) * valid
+    return np.sum(arr[clipped_indices] * weights, axis=1)
 
 def lanczos_resampling(arr, new_len, order=3):
     """Resample a 1D array to a new length with Lanczos interpolation.
