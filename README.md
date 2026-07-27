@@ -8,13 +8,14 @@ Python-side requirements:
 - Python 3.9+
 - `pandas`
 - `numpy`
+- `scipy`
 - `torch`
 - `tqdm`
 
 Install them with:
 
 ```bash
-pip install pandas numpy torch tqdm
+pip install pandas numpy scipy torch tqdm
 ```
 
 System requirement:
@@ -109,6 +110,94 @@ model.eval()
 with torch.no_grad():
     prediction = model(x_seq, x_struct, x_wobble)
 ```
+
+### Bias-Only Calibration
+
+For exon- or dataset-specific baseline adjustment, `predict.py` can fit only
+the bias of the tuner's final dense layer before computing predictions. All
+sequence, structure, aggregation, and tuner weights remain frozen. The fitted
+bias adds one constant to every logit, preserving relative logit differences
+between variants.
+
+For dataframe-based use, `predict()` accepts already-flanked sequences and
+performs RNAfold, one-hot encoding, and wobble processing internally:
+
+```python
+import pandas as pd
+from predict import predict
+
+df = pd.read_csv("exon_variants.csv")
+
+# Requires df["flanked_sequence"].
+predictions = predict(df)
+
+# Also requires true PSI in df["PSI"]. One bias is fitted over all rows.
+calibrated_predictions = predict(df, calibrate=True)
+```
+
+The returned dataframe preserves all input columns and adds `predicted_PSI`.
+When calibration is enabled, it also adds `predicted_PSI_uncalibrated`; the
+fitted bias and RMSE summary are available from
+`calibrated_predictions.attrs["bias_calibration"]`. Since
+`flanked_sequence` is treated as the complete model input, the preprocessing
+does not add another pair of flanks.
+
+Run the pretrained model without calibration:
+
+```bash
+python predict.py \
+  --dataset data/test_data.npz \
+  --checkpoint model_weights.pt \
+  --output predictions.csv
+```
+
+Fit the bias using `metadata_PSI` from the prediction dataset, then predict that
+dataset:
+
+```bash
+python predict.py \
+  --dataset exon_variants.npz \
+  --checkpoint model_weights.pt \
+  --tune-bias \
+  --output exon_variant_predictions.csv
+```
+
+Alternatively, fit the bias on one labeled dataset and predict another:
+
+```bash
+python predict.py \
+  --dataset unseen_variants.npz \
+  --calibration-dataset known_variants.npz \
+  --checkpoint model_weights.pt \
+  --output unseen_variant_predictions.csv
+```
+
+`--target-key` selects a target field other than `metadata_PSI`.
+`--weight-key` optionally supplies non-negative per-example weights, such as
+read depth. When calibration is enabled, the output CSV contains raw and
+calibrated predictions, and a JSON calibration report is saved alongside it.
+The original checkpoint is never overwritten; use
+`--save-calibrated-checkpoint` to explicitly save a separate calibrated model.
+
+Fitting and evaluating on the same dataset is in-sample calibration. This can
+be appropriate for an exon-specific baseline adjustment, but use a separate
+labeled calibration set when reporting out-of-sample predictive performance.
+
+The reusable Python API accepts a loader yielding
+`(sequence, structure, wobble, target)` batches:
+
+```python
+from calibration import tune_output_bias_
+
+result = tune_output_bias_(model, calibration_loader, device="cpu")
+print(result.bias_delta)
+```
+
+The bias is fitted with SciPy's bounded scalar optimizer by minimizing RMSE
+between measured PSI and the sigmoid-transformed predictions. This mirrors the
+basal-shift procedure used in the original analysis while avoiding any updates
+to the rest of the model. The fitted delta is limited by
+`--max-abs-bias-delta`, and the report records when that bound is reached.
 
 ### Sequence-Only Analysis
 
