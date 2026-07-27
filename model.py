@@ -1,5 +1,7 @@
 """PyTorch implementation of the PNAS splicing model and related helpers."""
 
+from __future__ import annotations
+
 import logging
 
 import numpy as np
@@ -345,11 +347,12 @@ class PNASModel(nn.Module):
             x_seq: Sequence tensor of shape ``(batch_size, 4, input_length)``.
             x_struct: Structure tensor of shape ``(batch_size, 3, input_length)``.
             x_wobble: Wobble tensor of shape ``(batch_size, 1, input_length)``.
+            return_logits: Return values before the final sigmoid when true.
 
         Returns:
-            Tensor containing sigmoid-transformed predictions for each example.
-            A batch of size one will be returned as a scalar because of the
-            final ``squeeze()``.
+            Tensor of shape ``(batch_size,)`` containing logits when
+            ``return_logits`` is true, otherwise sigmoid-transformed
+            probabilities.
         """
         # Compute sequence activations - each is (batch_size, F_seq, 85)
         conv_skip_out = self.conv_skip(x_seq) + self.position_bias_skip.unsqueeze(0)  # Add position bias
@@ -376,12 +379,45 @@ class PNASModel(nn.Module):
         tuner_out = self.tuner(energy_out)  # (batch_size, 1)
 
         if return_logits:
-            return tuner_out.squeeze()  # (batch_size,)
+            return tuner_out.squeeze(-1)  # (batch_size,)
         
         # compute sigmoid, return (0, 1)
-        out = self.output_activation(tuner_out).squeeze()  # (batch_size,)
+        out = self.output_activation(tuner_out).squeeze(-1)  # (batch_size,)
 
         return out
+
+    @torch.no_grad()
+    def shift_output_bias_(self, delta: float | torch.Tensor):
+        """Add a constant offset to every output logit.
+
+        The final dense layer in :class:`ResidualTuner` is followed by a
+        residual addition, so changing ``tuner.fc3.bias`` by ``delta`` changes
+        every final logit by exactly the same amount. No other learned
+        parameter or relative logit difference is affected.
+
+        Args:
+            delta: Scalar logit offset to add to ``tuner.fc3.bias``.
+
+        Returns:
+            The current model instance.
+
+        Raises:
+            ValueError: If ``delta`` is not scalar or is not finite.
+        """
+        delta_tensor = torch.as_tensor(
+            delta,
+            dtype=self.tuner.fc3.bias.dtype,
+            device=self.tuner.fc3.bias.device,
+        )
+        if delta_tensor.numel() != 1:
+            raise ValueError(
+                f"Output-bias delta must be scalar, got shape {tuple(delta_tensor.shape)}."
+            )
+        if not torch.isfinite(delta_tensor).item():
+            raise ValueError("Output-bias delta must be finite.")
+
+        self.tuner.fc3.bias.add_(delta_tensor.reshape_as(self.tuner.fc3.bias))
+        return self
 
     def compute_sequence_activations(self, x_seq, agg='mean'):
         """Summarize sequence filter activations for inclusion and skipping.
