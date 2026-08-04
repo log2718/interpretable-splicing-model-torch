@@ -65,7 +65,7 @@ for label, act in [("incl", act_incl), ("skip", act_skip)]:
                 alpha=0.75, edgecolor="none")
         ax.set_yscale("log")
         ax.set_ylim(bottom=1)
-        ax.set_xlim(0, 2.0 if label == "incl" else 2.5)
+        ax.set_xlim(0, act.max() * 1.05)
         frac_zero = (vals < 0.01).mean()
         ax.set_title(f"Filter {fi}  (zero={frac_zero:.0%})", fontsize=8)
         ax.set_xlabel("Activation", fontsize=7)
