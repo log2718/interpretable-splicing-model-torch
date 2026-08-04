@@ -1,0 +1,121 @@
+++ hostname
++ echo 'Hostname: cs626.hpc.nyu.edu'
+++ date
++ echo 'Starting at: Mon Aug  3 12:10:26 EDT 2026'
++ cd /scratch/yl12316/interpretable-splicing-model-torch
++ singularity exec --nv --overlay /scratch/yl12316/my_project/overlay-15GB-500K.ext3:ro /share/apps/images/cuda13.0.1-cudnn9.13.0-ubuntu-24.04.3.sif /bin/bash -c '
+    source /ext3/env.sh
+
+    python -c '\''import numpy, torch; print("numpy", numpy.__version__); print("torch", torch.__version__)'\''
+
+    cd /scratch/yl12316/interpretable-splicing-model-torch
+
+    python train.py       --train-npz data/train_flank_150_30.npz       --test-npz data/test_flank_150_30.npz       --input-length 250       --checkpoint checkpoints/flank_150_30/best_model_20260530_042839.pt       --checkpoint-dir checkpoints/flank_150_30_uncertainty_constvar       --uncertainty       --constant-var       --freeze-epochs 5       --lr 1e-3       --lr-phase2 1e-4       --epochs 150       --patience 10       --batch-size 256       --seed 42       --no-batchnorm
+  '
+2026-08-03 12:10:49 [INFO] __main__ — Random seed: 42
+2026-08-03 12:10:49 [INFO] __main__ — Device: cpu
+2026-08-03 12:10:49 [INFO] __main__ — Loading training data: data/train_flank_150_30.npz
+2026-08-03 12:10:51 [INFO] __main__ —   Loaded — examples: 191,846, seq: (191846, 4, 250), struct: (191846, 3, 250), wobble: (191846, 1, 250)
+2026-08-03 12:10:51 [INFO] __main__ — Split (seed=42) — train: 172,662 (90%), val: 19,184 (10%)
+2026-08-03 12:10:51 [INFO] __main__ — DataLoaders — train: 675 batches, val: 75 batches (batch_size=256)
+2026-08-03 12:10:51 [INFO] __main__ — Instantiating PNASModel — input_length=250, use_batchnorm=False
+2026-08-03 12:10:51 [INFO] model — ResidualTuner: BatchNorm disabled — bn1 and bn2 replaced with nn.Identity.
+2026-08-03 12:10:51 [INFO] model — PNASModel initialized — input_length=250, use_batchnorm=False, total parameters: 19,069
+2026-08-03 12:10:51 [INFO] __main__ — Loading checkpoint: checkpoints/flank_150_30/best_model_20260530_042839.pt
+2026-08-03 12:10:51 [INFO] model — === load_partial_state_dict ===
+2026-08-03 12:10:51 [INFO] model —   Model parameters:      28
+2026-08-03 12:10:51 [INFO] model —   Checkpoint parameters: 30
+2026-08-03 12:10:51 [INFO] model —   Will be loaded (20):
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  conv_incl.bias
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  conv_incl.weight
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  conv_skip.bias
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  conv_skip.weight
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  conv_struct_incl.bias
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  conv_struct_incl.weight
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  conv_struct_skip.bias
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  conv_struct_skip.weight
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  energy_seq_struct.b
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  energy_seq_struct.w
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  position_bias_incl
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  position_bias_incl_struct
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  position_bias_skip
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  position_bias_skip_struct
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  tuner.fc1.bias
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  tuner.fc1.weight
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  tuner.fc2.bias
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  tuner.fc2.weight
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  tuner.fc3.bias
+2026-08-03 12:10:51 [INFO] model —     [LOAD]  tuner.fc3.weight
+2026-08-03 12:10:51 [INFO] model —   Kept at current/random init (8):
+2026-08-03 12:10:51 [INFO] model —     [INIT]  variance_bottleneck.bias
+2026-08-03 12:10:51 [INFO] model —     [INIT]  variance_bottleneck.weight
+2026-08-03 12:10:51 [INFO] model —     [INIT]  variance_tuner.fc1.bias
+2026-08-03 12:10:51 [INFO] model —     [INIT]  variance_tuner.fc1.weight
+2026-08-03 12:10:51 [INFO] model —     [INIT]  variance_tuner.fc2.bias
+2026-08-03 12:10:51 [INFO] model —     [INIT]  variance_tuner.fc2.weight
+2026-08-03 12:10:51 [INFO] model —     [INIT]  variance_tuner.fc3.bias
+2026-08-03 12:10:51 [INFO] model —     [INIT]  variance_tuner.fc3.weight
+2026-08-03 12:10:51 [WARNING] model —   Unexpected checkpoint keys — will be ignored (10):
+2026-08-03 12:10:51 [WARNING] model —     [SKIP]  tuner.bn1.bias
+2026-08-03 12:10:51 [WARNING] model —     [SKIP]  tuner.bn1.num_batches_tracked
+2026-08-03 12:10:51 [WARNING] model —     [SKIP]  tuner.bn1.running_mean
+2026-08-03 12:10:51 [WARNING] model —     [SKIP]  tuner.bn1.running_var
+2026-08-03 12:10:51 [WARNING] model —     [SKIP]  tuner.bn1.weight
+2026-08-03 12:10:51 [WARNING] model —     [SKIP]  tuner.bn2.bias
+2026-08-03 12:10:51 [WARNING] model —     [SKIP]  tuner.bn2.num_batches_tracked
+2026-08-03 12:10:51 [WARNING] model —     [SKIP]  tuner.bn2.running_mean
+2026-08-03 12:10:51 [WARNING] model —     [SKIP]  tuner.bn2.running_var
+2026-08-03 12:10:51 [WARNING] model —     [SKIP]  tuner.bn2.weight
+2026-08-03 12:10:51 [INFO] model —   Load result — missing: 8, unexpected: 10
+2026-08-03 12:10:51 [INFO] model — === load_partial_state_dict complete ===
+2026-08-03 12:10:51 [INFO] __main__ — Phase 1 — freezing all parameters except variance_bottleneck / variance_tuner for 5 epoch(s).
+2026-08-03 12:10:57 [INFO] __main__ — === Training configuration ===
+2026-08-03 12:10:57 [INFO] __main__ —   Device:          cpu
+2026-08-03 12:10:57 [INFO] __main__ —   Max epochs:      150
+2026-08-03 12:10:57 [INFO] __main__ —   Patience:        10
+2026-08-03 12:10:57 [INFO] __main__ —   LR:              0.001
+2026-08-03 12:10:57 [INFO] __main__ —   Weight decay:    0.0
+2026-08-03 12:10:57 [INFO] __main__ —   Train batches:   675
+2026-08-03 12:10:57 [INFO] __main__ —   Val batches:     75
+2026-08-03 12:10:57 [INFO] __main__ —   Checkpoint path: checkpoints/flank_150_30_uncertainty_constvar/best_model_20260803_121057.pt
+2026-08-03 12:10:57 [INFO] __main__ — --- Epoch 1/150 ---
+  train:   0%|          | 0/675 [00:00<?, ?batch/s]/ext3/miniforge3/lib/python3.13/site-packages/torch/nn/modules/conv.py:380: UserWarning: Using padding='same' with even kernel lengths and odd dilation may require a zero-padded copy of the input be created (Triggered internally at /pytorch/aten/src/ATen/native/Convolution.cpp:1090.)
+  return F.conv1d(
+                                                   Traceback (most recent call last):
+  File "/scratch/yl12316/interpretable-splicing-model-torch/train.py", line 606, in <module>
+    main()
+    ~~~~^^
+  File "/scratch/yl12316/interpretable-splicing-model-torch/train.py", line 573, in main
+    results = train(model, train_loader, val_loader, hparams)
+  File "/scratch/yl12316/interpretable-splicing-model-torch/train.py", line 296, in train
+    train_metrics = train_epoch(model, train_loader, optimizer, loss_fn, device,
+                                uncertainty=uncertainty, constant_var=constant_var,
+                                l1_lambda=l1_lambda)
+  File "/scratch/yl12316/interpretable-splicing-model-torch/train.py", line 142, in train_epoch
+    loss.backward()
+    ~~~~~~~~~~~~~^^
+  File "/ext3/miniforge3/lib/python3.13/site-packages/torch/_tensor.py", line 631, in backward
+    torch.autograd.backward(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        self, gradient, retain_graph, create_graph, inputs=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/ext3/miniforge3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 379, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/ext3/miniforge3/lib/python3.13/site-packages/torch/autograd/graph.py", line 882, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
