@@ -49,68 +49,32 @@ def kl_divergence_from_logits(logits, targets):
     )
 
 
-def gaussian_nll_logit(logit_mu, log_var, var, targets):
-    """Gaussian NLL in logit space.
-
-    Loss = mean(0.5 * log_var  +  0.5 * (logit_true - logit_mu)² / var)
-
-    Targets are clamped to [1e-2, 1-1e-2] before logit to avoid penalising
-    unresolvable differences at extreme PSI (e.g. 99% vs 99.9%).
-
-    Args:
-        logit_mu: Predicted mean in logit space, shape ``(batch,)``.
-        log_var:  log of predicted variance, shape ``(batch,)``.
-        var:      Predicted variance (softplus + eps), shape ``(batch,)``.
-        targets:  True PSI values in [0, 1], shape ``(batch,)``.
-
-    Returns:
-        Tuple ``(loss, term1_val, term2_val)`` where ``loss`` is the scalar
-        mean NLL (with gradient), and ``term1_val`` / ``term2_val`` are
-        Python floats for logging the log_var term and residual term.
-    """
-    logit_true = torch.logit(targets.clamp(1e-2, 1 - 1e-2))
-    term1 = 0.5 * log_var                               # uncertainty penalty
-    term2 = 0.5 * (logit_true - logit_mu) ** 2 / var   # fit term
-    loss  = (term1 + term2).mean()
-    return loss, term1.mean().item(), term2.mean().item()
-
-
 def rmse(pred: torch.Tensor, target: torch.Tensor) -> float:
     return torch.sqrt(torch.mean((pred - target) ** 2)).item()
 
 
-# ── Per-epoch loops ───────────────────────────────────────────────────────────
-
 def _l2_smooth_loss(model: torch.nn.Module) -> torch.Tensor:
-    """L2 smoothness penalty on position bias weights.
-
-    Penalises squared first differences between adjacent positions, encouraging
-    the learned position bias to vary smoothly rather than spike.
-    Applies to all parameters whose name contains 'position_bias'.
-    """
-    loss = torch.tensor(0.0)
+    """Squared first differences on position bias weights (L2 smoothness)."""
+    loss = torch.tensor(0.0, device=next(model.parameters()).device)
     for name, p in model.named_parameters():
         if "position_bias" in name and p.numel() > 1:
             loss = loss + ((p[1:] - p[:-1]) ** 2).sum()
     return loss
 
 
-def train_epoch(model, loader, optimizer, loss_fn, device,
-                uncertainty: bool = False, constant_var: bool = False,
-                l1_lambda: float = 0.0, l2_smooth: float = 0.0) -> dict:
-    """One forward+backward pass over ``loader``. Returns loss, RMSE, and
-    (when uncertainty=True) per-term NLL components and mean KL divergence.
+# ── Per-epoch loops ───────────────────────────────────────────────────────────
 
-    l1_lambda:  L1 activity regularization on post-softplus filter activations.
-    l2_smooth:  L2 smoothness regularization on position bias weights (squared
-                first differences between adjacent positions).
-    """
+def train_epoch(model, loader, optimizer, loss_fn, device,
+                l1_lambda: float = 0.0, l2_smooth: float = 0.0) -> dict:
+    """One forward+backward pass. Supports L1 activity and L2 smoothness reg."""
     model.train()
-    total_loss = total_term1 = total_term2 = total_kl = total_l1 = total_l2 = 0.0
+    total_loss = total_l1 = total_l2 = 0.0
     pred_list, target_list = [], []
 
-    # Register hooks to capture post-softplus filter activations for L1 reg
-    _act = [None, None]   # [incl, skip]
+    # Hook captures post-softplus activations for L1 (seq-only in stage 1,
+    # seq+struct in stages 2/3 — correct either way since hooks attach to the
+    # energy_activation modules which see whatever is concatenated).
+    _act = [None, None]
     hooks = []
     if l1_lambda > 0.0:
         hooks.append(model.energy_activation_incl.register_forward_hook(
@@ -129,33 +93,18 @@ def train_epoch(model, loader, optimizer, loss_fn, device,
             y      = y.to(device, dtype=torch.float32, non_blocking=True)
 
             optimizer.zero_grad()
-
-            if uncertainty:
-                logit_mu, log_var, var = model(seq, struct, wobble,
-                                               return_logits=True,
-                                               return_uncertainty=True)
-                if constant_var:
-                    log_var = torch.zeros_like(log_var)
-                    var     = torch.ones_like(var)
-                pred_probs = torch.sigmoid(logit_mu)
-                loss, t1, t2 = gaussian_nll_logit(logit_mu, log_var, var, y)
-                total_term1 += t1 * y.size(0)
-                total_term2 += t2 * y.size(0)
-                with torch.no_grad():
-                    total_kl += kl_divergence_from_logits(logit_mu, y).item() * y.size(0)
-            else:
-                logits     = model(seq, struct, wobble, return_logits=True)
-                pred_probs = torch.sigmoid(logits)
-                loss       = loss_fn(logits, y)
+            logits     = model(seq, struct, wobble, return_logits=True)
+            pred_probs = torch.sigmoid(logits)
+            loss       = loss_fn(logits, y)
 
             if l1_lambda > 0.0:
-                l1_reg = l1_lambda * (_act[0].mean() + _act[1].mean())
-                loss   = loss + l1_reg
+                l1_reg   = l1_lambda * (_act[0].mean() + _act[1].mean())
+                loss     = loss + l1_reg
                 total_l1 += l1_reg.item() * y.size(0)
 
             if l2_smooth > 0.0:
-                l2_reg = l2_smooth * _l2_smooth_loss(model)
-                loss   = loss + l2_reg
+                l2_reg   = l2_smooth * _l2_smooth_loss(model)
+                loss     = loss + l2_reg
                 total_l2 += l2_reg.item() * y.size(0)
 
             loss.backward()
@@ -164,7 +113,6 @@ def train_epoch(model, loader, optimizer, loss_fn, device,
             total_loss += loss.item() * y.size(0)
             pred_list.append(pred_probs.detach())
             target_list.append(y.detach())
-
             pbar.set_postfix(batch_loss=f"{loss.item():.5f}")
     finally:
         for h in hooks:
@@ -174,10 +122,6 @@ def train_epoch(model, loader, optimizer, loss_fn, device,
     preds = torch.cat(pred_list)
     tgts  = torch.cat(target_list)
     out   = {"loss": total_loss / n, "rmse": rmse(preds, tgts)}
-    if uncertainty:
-        out["term1"] = total_term1 / n
-        out["term2"] = total_term2 / n
-        out["kl"]    = total_kl    / n
     if l1_lambda > 0.0:
         out["l1"] = total_l1 / n
     if l2_smooth > 0.0:
@@ -185,12 +129,10 @@ def train_epoch(model, loader, optimizer, loss_fn, device,
     return out
 
 
-def eval_epoch(model, loader, loss_fn, device,
-               uncertainty: bool = False, constant_var: bool = False) -> dict:
-    """No-grad evaluation pass over ``loader``. Returns loss, RMSE, and
-    (when uncertainty=True) per-term NLL components and mean KL divergence."""
+def eval_epoch(model, loader, loss_fn, device) -> dict:
+    """No-grad evaluation pass. Returns pure KL loss (no regularization terms)."""
     model.eval()
-    total_loss = total_term1 = total_term2 = total_kl = 0.0
+    total_loss = 0.0
     pred_list, target_list = [], []
 
     pbar = tqdm(loader, desc="  eval ", leave=False, unit="batch")
@@ -201,56 +143,50 @@ def eval_epoch(model, loader, loss_fn, device,
             wobble = wobble.to(device, non_blocking=True)
             y      = y.to(device, dtype=torch.float32, non_blocking=True)
 
-            if uncertainty:
-                logit_mu, log_var, var = model(seq, struct, wobble,
-                                               return_logits=True,
-                                               return_uncertainty=True)
-                if constant_var:
-                    log_var = torch.zeros_like(log_var)
-                    var     = torch.ones_like(var)
-                pred_probs = torch.sigmoid(logit_mu)
-                loss, t1, t2 = gaussian_nll_logit(logit_mu, log_var, var, y)
-                total_term1 += t1 * y.size(0)
-                total_term2 += t2 * y.size(0)
-                total_kl    += kl_divergence_from_logits(logit_mu, y).item() * y.size(0)
-            else:
-                logits     = model(seq, struct, wobble, return_logits=True)
-                pred_probs = torch.sigmoid(logits)
-                loss       = loss_fn(logits, y)
+            logits     = model(seq, struct, wobble, return_logits=True)
+            pred_probs = torch.sigmoid(logits)
+            loss       = loss_fn(logits, y)
 
             total_loss += loss.item() * y.size(0)
             pred_list.append(pred_probs)
             target_list.append(y)
 
-            pbar.set_postfix(batch_loss=f"{loss.item():.5f}")
-
-    n     = len(loader.dataset)
-    preds = torch.cat(pred_list)
-    tgts  = torch.cat(target_list)
-    out   = {"loss": total_loss / n, "rmse": rmse(preds, tgts)}
-    if uncertainty:
-        out["term1"] = total_term1 / n
-        out["term2"] = total_term2 / n
-        out["kl"]    = total_kl    / n
-    return out
+    preds   = torch.cat(pred_list)
+    targets = torch.cat(target_list)
+    return {"loss": total_loss / len(loader.dataset), "rmse": rmse(preds, targets)}
 
 
-# ── Training loop ─────────────────────────────────────────────────────────────
+# ── Freeze helpers ────────────────────────────────────────────────────────────
 
-def train(model, train_loader, val_loader, hparams: dict) -> dict:
-    """Outer training loop with early stopping and checkpointing.
+_STRUCT_PARAMS = {"conv_struct_incl", "conv_struct_skip",
+                  "position_bias_incl_struct", "position_bias_skip_struct"}
+_TUNER_PARAMS  = {"tuner", "variance_bottleneck", "variance_tuner"}
 
-    Args:
-        model: PNASModel instance.
-        train_loader: DataLoader for training examples.
-        val_loader: DataLoader for validation examples.
-        hparams: Dict with keys: device, num_epochs, patience, checkpoint_dir,
-                 lr, weight_decay, loss_fn, uncertainty, freeze_epochs.
 
-    Returns:
-        Dict with keys: history (list of per-epoch dicts), best_val_loss (float),
-        checkpoint_path (str).
+def _freeze_for_stage(model: torch.nn.Module, stage: int) -> None:
+    """Set requires_grad on each parameter according to the training stage.
+
+    Stage 1: only seq conv + seq position bias + SumDiff trainable.
+    Stage 2: add struct conv + struct position bias.
+    Stage 3: everything except variance branch (which is not used here).
     """
+    frozen_groups = _TUNER_PARAMS.copy()       # always freeze tuner in staged training
+    if stage == 1:
+        frozen_groups |= _STRUCT_PARAMS        # also freeze struct in stage 1
+
+    for name, p in model.named_parameters():
+        is_frozen = any(name.startswith(g) or g in name for g in frozen_groups)
+        p.requires_grad = not is_frozen
+
+    n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    n_total = sum(p.numel() for p in model.parameters())
+    logger.info(f"  Stage {stage} — trainable params: {n_train:,} / {n_total:,}")
+
+
+# ── Single-stage training loop ────────────────────────────────────────────────
+
+def _train_one_stage(model, train_loader, val_loader, hparams: dict) -> dict:
+    """Standard early-stopping loop. Optimizer built from requires_grad params only."""
     device         = hparams["device"]
     num_epochs     = hparams["num_epochs"]
     patience       = hparams["patience"]
@@ -258,27 +194,8 @@ def train(model, train_loader, val_loader, hparams: dict) -> dict:
     lr             = hparams["lr"]
     weight_decay   = hparams.get("weight_decay", 0.0)
     loss_fn        = hparams.get("loss_fn", kl_divergence_from_logits)
-    uncertainty    = hparams.get("uncertainty", False)
-    freeze_epochs  = hparams.get("freeze_epochs", 0)
-    constant_var   = hparams.get("constant_var", False)
     l1_lambda      = hparams.get("l1_lambda", 0.0)
     l2_smooth      = hparams.get("l2_smooth", 0.0)
-
-    model = model.to(device)
-
-    # Phase 1 is meaningless when variance is pinned to a constant (no gradient
-    # flows through the variance branch), so skip it.
-    if constant_var:
-        freeze_epochs = 0
-
-    # Phase 1: freeze all params except the variance branch
-    if uncertainty and freeze_epochs > 0:
-        for name, p in model.named_parameters():
-            p.requires_grad = ("variance_bottleneck" in name or "variance_tuner" in name)
-        logger.info(
-            f"Phase 1 — freezing all parameters except variance_bottleneck / variance_tuner "
-            f"for {freeze_epochs} epoch(s)."
-        )
 
     optimizer = torch.optim.Adam(
         filter(lambda p: p.requires_grad, model.parameters()),
@@ -286,45 +203,22 @@ def train(model, train_loader, val_loader, hparams: dict) -> dict:
     )
 
     os.makedirs(checkpoint_dir, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp       = datetime.now().strftime("%Y%m%d_%H%M%S")
     checkpoint_path = os.path.join(checkpoint_dir, f"best_model_{timestamp}.pt")
 
-    logger.info("=== Training configuration ===")
-    logger.info(f"  Device:          {device}")
-    logger.info(f"  Max epochs:      {num_epochs}")
-    logger.info(f"  Patience:        {patience}")
-    logger.info(f"  LR:              {lr}")
-    logger.info(f"  Weight decay:    {weight_decay}")
-    logger.info(f"  Train batches:   {len(train_loader)}")
-    logger.info(f"  Val batches:     {len(val_loader)}")
-    logger.info(f"  Checkpoint path: {checkpoint_path}")
+    logger.info(f"  Checkpoint → {checkpoint_path}")
+    logger.info(f"  Max epochs: {num_epochs}  Patience: {patience}  LR: {lr}")
 
-    best_val_loss = float("inf")
+    best_val_loss              = float("inf")
     epochs_without_improvement = 0
-    history = []
+    history                    = []
 
     for epoch in range(1, num_epochs + 1):
-        logger.info(f"--- Epoch {epoch}/{num_epochs} ---")
-
-        # Phase 2: unfreeze all parameters after freeze_epochs
-        if uncertainty and freeze_epochs > 0 and epoch == freeze_epochs + 1:
-            logger.info(
-                f"Phase 2 — unfreezing all parameters, rebuilding optimizer "
-                f"with lr={hparams.get('lr_phase2', lr * 0.1):.2e}"
-            )
-            for p in model.parameters():
-                p.requires_grad = True
-            optimizer = torch.optim.Adam(
-                model.parameters(),
-                lr=hparams.get("lr_phase2", lr * 0.1),
-                weight_decay=weight_decay,
-            )
+        logger.info(f"  Epoch {epoch}/{num_epochs}")
 
         train_metrics = train_epoch(model, train_loader, optimizer, loss_fn, device,
-                                    uncertainty=uncertainty, constant_var=constant_var,
                                     l1_lambda=l1_lambda, l2_smooth=l2_smooth)
-        val_metrics   = eval_epoch(model, val_loader, loss_fn, device,
-                                   uncertainty=uncertainty, constant_var=constant_var)
+        val_metrics   = eval_epoch(model, val_loader, loss_fn, device)
 
         record = {
             "epoch":      epoch,
@@ -333,15 +227,152 @@ def train(model, train_loader, val_loader, hparams: dict) -> dict:
             "val_loss":   val_metrics["loss"],
             "val_rmse":   val_metrics["rmse"],
         }
-        if uncertainty:
-            record.update({
-                "train_term1": train_metrics["term1"],
-                "train_term2": train_metrics["term2"],
-                "train_kl":    train_metrics["kl"],
-                "val_term1":   val_metrics["term1"],
-                "val_term2":   val_metrics["term2"],
-                "val_kl":      val_metrics["kl"],
-            })
+        history.append(record)
+
+        logger.info(
+            f"    train loss={train_metrics['loss']:.6f}  rmse={train_metrics['rmse']:.6f}"
+        )
+        logger.info(
+            f"    val   loss={val_metrics['loss']:.6f}  rmse={val_metrics['rmse']:.6f}"
+        )
+
+        if val_metrics["loss"] < best_val_loss:
+            prev_best     = best_val_loss
+            best_val_loss = val_metrics["loss"]
+            epochs_without_improvement = 0
+            torch.save(
+                {
+                    "epoch":                epoch,
+                    "model_state_dict":     model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "best_val_loss":        best_val_loss,
+                    "history":              history,
+                    "hparams":              {k: str(v) for k, v in hparams.items()},
+                },
+                checkpoint_path,
+            )
+            logger.info(f"    ✓ val loss {prev_best:.6f} → {best_val_loss:.6f}  saved")
+        else:
+            epochs_without_improvement += 1
+            logger.info(
+                f"    no improvement {epochs_without_improvement}/{patience} "
+                f"(best={best_val_loss:.6f})"
+            )
+            if epochs_without_improvement >= patience:
+                logger.info(f"  Early stopping after {epoch} epochs.")
+                break
+
+    logger.info(f"  Stage complete — best val loss: {best_val_loss:.6f}")
+    return {"history": history, "best_val_loss": best_val_loss,
+            "checkpoint_path": checkpoint_path}
+
+
+# ── Staged training (3-stage PNAS schedule) ───────────────────────────────────
+
+def train_staged(model, train_loader, val_loader, hparams: dict) -> dict:
+    """Three-stage training matching the original PNAS paper schedule.
+
+    Stage 1: seq filters + SumDiff only, struct/tuner frozen.
+    Stage 2: seq + struct filters, tuner still frozen.
+    Stage 3: full model including ResidualTuner.
+
+    L1/L2 regularization is applied throughout all stages.
+    """
+    device         = hparams["device"]
+    checkpoint_dir = hparams["checkpoint_dir"]
+    stage_epochs   = [
+        hparams.get("stage1_epochs", 50),
+        hparams.get("stage2_epochs", 50),
+        hparams.get("stage3_epochs", hparams["num_epochs"]),
+    ]
+
+    model = model.to(device)
+    results = {}
+
+    for stage in [1, 2, 3]:
+        logger.info(f"\n{'='*60}")
+        logger.info(f"=== STAGE {stage} — {stage_epochs[stage-1]} epochs ===")
+        logger.info(f"{'='*60}")
+
+        model.stage = stage
+        _freeze_for_stage(model, stage)
+
+        # Load best checkpoint from previous stage (skip on stage 1)
+        if stage > 1:
+            prev_ckpt = results[stage - 1]["checkpoint_path"]
+            logger.info(f"  Loading stage {stage-1} checkpoint: {prev_ckpt}")
+            ckpt = torch.load(prev_ckpt, map_location=device, weights_only=False)
+            model.load_state_dict(ckpt["model_state_dict"])
+            # Re-apply freeze after load_state_dict (it doesn't touch requires_grad)
+            _freeze_for_stage(model, stage)
+
+        stage_hparams = {
+            **hparams,
+            "num_epochs":     stage_epochs[stage - 1],
+            "checkpoint_dir": os.path.join(checkpoint_dir, f"stage{stage}"),
+        }
+        results[stage] = _train_one_stage(model, train_loader, val_loader, stage_hparams)
+
+    # Reset to stage 3 for inference
+    model.stage = 3
+    logger.info("\n=== Staged training complete ===")
+    logger.info(f"  Stage 1 best val loss: {results[1]['best_val_loss']:.6f}")
+    logger.info(f"  Stage 2 best val loss: {results[2]['best_val_loss']:.6f}")
+    logger.info(f"  Stage 3 best val loss: {results[3]['best_val_loss']:.6f}")
+    return results[3]
+
+
+# ── Non-staged training loop (unchanged from Arush's version) ────────────────
+
+def train(model, train_loader, val_loader, hparams: dict) -> dict:
+    """Standard single-stage training loop with optional L1/L2 regularization."""
+    device         = hparams["device"]
+    num_epochs     = hparams["num_epochs"]
+    patience       = hparams["patience"]
+    checkpoint_dir = hparams["checkpoint_dir"]
+    lr             = hparams["lr"]
+    weight_decay   = hparams.get("weight_decay", 0.0)
+    loss_fn        = hparams.get("loss_fn", kl_divergence_from_logits)
+    l1_lambda      = hparams.get("l1_lambda", 0.0)
+    l2_smooth      = hparams.get("l2_smooth", 0.0)
+
+    model     = model.to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    timestamp       = datetime.now().strftime("%Y%m%d_%H%M%S")
+    checkpoint_path = os.path.join(checkpoint_dir, f"best_model_{timestamp}.pt")
+
+    logger.info("=== Training configuration ===")
+    logger.info(f"  Device:          {device}")
+    logger.info(f"  Max epochs:      {num_epochs}")
+    logger.info(f"  Patience:        {patience}")
+    logger.info(f"  LR:              {lr}")
+    logger.info(f"  Weight decay:    {weight_decay}")
+    logger.info(f"  L1 lambda:       {l1_lambda}")
+    logger.info(f"  L2 smooth:       {l2_smooth}")
+    logger.info(f"  Train batches:   {len(train_loader)}")
+    logger.info(f"  Val batches:     {len(val_loader)}")
+    logger.info(f"  Checkpoint path: {checkpoint_path}")
+
+    best_val_loss              = float("inf")
+    epochs_without_improvement = 0
+    history                    = []
+
+    for epoch in range(1, num_epochs + 1):
+        logger.info(f"--- Epoch {epoch}/{num_epochs} ---")
+
+        train_metrics = train_epoch(model, train_loader, optimizer, loss_fn, device,
+                                    l1_lambda=l1_lambda, l2_smooth=l2_smooth)
+        val_metrics   = eval_epoch(model, val_loader, loss_fn, device)
+
+        record = {
+            "epoch":      epoch,
+            "train_loss": train_metrics["loss"],
+            "train_rmse": train_metrics["rmse"],
+            "val_loss":   val_metrics["loss"],
+            "val_rmse":   val_metrics["rmse"],
+        }
         history.append(record)
 
         logger.info(
@@ -350,15 +381,9 @@ def train(model, train_loader, val_loader, hparams: dict) -> dict:
         logger.info(
             f"  Val   — loss: {val_metrics['loss']:.6f}  rmse: {val_metrics['rmse']:.6f}"
         )
-        if uncertainty:
-            logger.info(
-                f"  Val   — term1(λ·log_var): {val_metrics['term1']:.6f}"
-                f"  term2(res²/var): {val_metrics['term2']:.6f}"
-                f"  KL: {val_metrics['kl']:.6f}"
-            )
 
         if val_metrics["loss"] < best_val_loss:
-            prev_best = best_val_loss
+            prev_best     = best_val_loss
             best_val_loss = val_metrics["loss"]
             epochs_without_improvement = 0
             torch.save(
@@ -374,7 +399,7 @@ def train(model, train_loader, val_loader, hparams: dict) -> dict:
             )
             logger.info(
                 f"  Val loss improved: {prev_best:.6f} -> {best_val_loss:.6f}"
-                f" — checkpoint saved to {checkpoint_path}"
+                f" — checkpoint saved"
             )
         else:
             epochs_without_improvement += 1
@@ -403,105 +428,42 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     data = parser.add_argument_group("data")
-    data.add_argument(
-        "--train-npz", required=True,
-        help="Training .npz produced by prepare_dataset.py.",
-    )
-    data.add_argument(
-        "--test-npz", default=None,
-        help="Optional held-out test .npz; evaluated once after training using the best checkpoint.",
-    )
-    data.add_argument(
-        "--val-split", type=float, default=0.1,
-        help="Fraction of training data held out for validation.",
-    )
+    data.add_argument("--train-npz", required=True)
+    data.add_argument("--test-npz",  default=None)
+    data.add_argument("--val-split", type=float, default=0.1)
 
     mdl = parser.add_argument_group("model")
-    mdl.add_argument(
-        "--input-length", type=int, default=140,
-        help="Input sequence length passed to PNASModel.",
-    )
-    mdl.add_argument(
-        "--no-batchnorm", action="store_true",
-        help="Disable BatchNorm in ResidualTuner (replace with nn.Identity).",
-    )
+    mdl.add_argument("--input-length", type=int, default=90)
+    mdl.add_argument("--no-batchnorm", action="store_true")
     mdl.add_argument(
         "--checkpoint", default=None, metavar="PATH",
-        help=(
-            "Warm-start from this checkpoint. Supports partial checkpoints "
-            "(e.g. seq filters only, seq+struct, or full model). "
-            "Missing parameters are left at random initialization."
-        ),
+        help="Warm-start from this checkpoint (partial load supported).",
     )
 
     opt = parser.add_argument_group("optimization")
-    opt.add_argument("--batch-size",    type=int,   default=64)
-    opt.add_argument("--epochs",        type=int,   default=100)
-    opt.add_argument("--lr",            type=float, default=1e-3)
-    opt.add_argument("--weight-decay",  type=float, default=0.0)
-    opt.add_argument(
-        "--patience", type=int, default=10,
-        help="Early stopping: epochs without val loss improvement before halting.",
-    )
+    opt.add_argument("--batch-size",   type=int,   default=64)
+    opt.add_argument("--epochs",       type=int,   default=100,
+                     help="Max epochs per stage (or total for non-staged).")
+    opt.add_argument("--lr",           type=float, default=1e-3)
+    opt.add_argument("--weight-decay", type=float, default=0.0)
+    opt.add_argument("--patience",     type=int,   default=10)
+    opt.add_argument("--l1-lambda",    type=float, default=0.0, dest="l1_lambda",
+                     help="L1 activity regularization on post-softplus filter activations.")
+    opt.add_argument("--l2-smooth",    type=float, default=0.0, dest="l2_smooth",
+                     help="L2 smoothness regularization on position bias weights.")
 
-    unc = parser.add_argument_group("uncertainty")
-    unc.add_argument(
-        "--uncertainty", action="store_true",
-        help=(
-            "Train with the variance head using Gaussian NLL in logit space. "
-            "Replaces the KL divergence loss."
-        ),
-    )
-    unc.add_argument(
-        "--freeze-epochs", type=int, default=5,
-        help=(
-            "Phase 1 length: number of epochs to train only the variance branch "
-            "(variance_bottleneck + variance_tuner) while all other parameters "
-            "are frozen. Only used when --uncertainty is set."
-        ),
-    )
-    unc.add_argument(
-        "--lr-phase2", type=float, default=None,
-        help=(
-            "Learning rate for phase 2 (full fine-tune). "
-            "Defaults to lr / 10 if not set."
-        ),
-    )
-    unc.add_argument(
-        "--constant-var", action="store_true", dest="constant_var",
-        help=(
-            "Ablation: pin var=1, log_var=0 throughout training (reduces Gaussian NLL "
-            "to plain MSE in logit space). Requires --uncertainty."
-        ),
-    )
-    unc.add_argument(
-        "--l1-lambda", type=float, default=0.0, dest="l1_lambda",
-        help=(
-            "Weight on L1 activity regularization applied to post-softplus filter "
-            "activations (incl + skip). Encourages sparse filter usage so individual "
-            "filters learn cleaner, identifiable motifs. Start with 1e-4 to 1e-3."
-        ),
-    )
-    unc.add_argument(
-        "--l2-smooth", type=float, default=0.0, dest="l2_smooth",
-        help=(
-            "Weight on L2 smoothness regularization applied to position bias weights. "
-            "Penalises squared first differences between adjacent positions, encouraging "
-            "smooth position bias curves. Used in the original PNAS paper alongside L1. "
-            "Start with 1e-4 to 1e-2."
-        ),
-    )
+    stg = parser.add_argument_group("staged training")
+    stg.add_argument("--staged", action="store_true",
+                     help="Use 3-stage training schedule from the PNAS paper.")
+    stg.add_argument("--stage1-epochs", type=int, default=50, dest="stage1_epochs",
+                     help="Epochs for stage 1 (seq only, simplified tuner).")
+    stg.add_argument("--stage2-epochs", type=int, default=50, dest="stage2_epochs",
+                     help="Epochs for stage 2 (seq+struct, simplified tuner).")
 
     run = parser.add_argument_group("runtime")
-    run.add_argument(
-        "--checkpoint-dir", default="./checkpoints",
-        help="Directory for saving best-model checkpoints.",
-    )
-    run.add_argument(
-        "--device", default=None, metavar="DEV",
-        help="Torch device string (e.g. 'cpu', 'cuda', 'cuda:1'). Auto-detects if omitted.",
-    )
-    run.add_argument("--seed", type=int, default=42)
+    run.add_argument("--checkpoint-dir", default="./checkpoints")
+    run.add_argument("--device", default=None)
+    run.add_argument("--seed",   type=int, default=42)
 
     return parser
 
@@ -516,22 +478,17 @@ def main() -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    # ── Reproducibility ───────────────────────────────────────────────────────
-    logger.info(f"Random seed: {args.seed}")
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    # ── Device ────────────────────────────────────────────────────────────────
-    if args.device is not None:
-        device = torch.device(args.device)
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(args.device) if args.device else \
+             torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Random seed: {args.seed}")
     logger.info(f"Device: {device}")
 
-    # ── Load training data ────────────────────────────────────────────────────
     logger.info(f"Loading training data: {args.train_npz}")
     train_npz = np.load(args.train_npz)
     x_seq     = train_npz["seq_oh"]
@@ -543,55 +500,38 @@ def main() -> None:
         f"seq: {x_seq.shape}, struct: {x_struct.shape}, wobble: {x_wobble.shape}"
     )
 
-    # ── Dataset and split ─────────────────────────────────────────────────────
     dataset = PSIDataset(x_seq, x_struct, x_wobble, y)
-    n_total = len(dataset)
-    n_val   = int(args.val_split * n_total)
-    n_train = n_total - n_val
-    if n_train == 0 or n_val == 0:
-        raise ValueError(f"Dataset too small for val_split={args.val_split}.")
-    logger.info(
-        f"Split (seed={args.seed}) — "
-        f"train: {n_train:,} ({1 - args.val_split:.0%}), "
-        f"val: {n_val:,} ({args.val_split:.0%})"
-    )
-
+    n_val   = int(args.val_split * len(dataset))
+    n_train = len(dataset) - n_val
     train_dataset, val_dataset = random_split(
-        dataset,
-        [n_train, n_val],
+        dataset, [n_train, n_val],
         generator=torch.Generator().manual_seed(args.seed),
     )
+    logger.info(f"Split — train: {n_train:,}  val: {n_val:,}")
 
     pin = device.type == "cuda"
-    train_loader = DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True,  pin_memory=pin,
-    )
-    val_loader = DataLoader(
-        val_dataset,   batch_size=args.batch_size, shuffle=False, pin_memory=pin,
-    )
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
+                              shuffle=True,  pin_memory=pin)
+    val_loader   = DataLoader(val_dataset,   batch_size=args.batch_size,
+                              shuffle=False, pin_memory=pin)
     logger.info(
         f"DataLoaders — train: {len(train_loader)} batches, "
         f"val: {len(val_loader)} batches (batch_size={args.batch_size})"
     )
 
-    # ── Model ─────────────────────────────────────────────────────────────────
     use_batchnorm = not args.no_batchnorm
-    logger.info(
-        f"Instantiating PNASModel — input_length={args.input_length}, "
-        f"use_batchnorm={use_batchnorm}"
-    )
+    logger.info(f"Instantiating PNASModel — input_length={args.input_length}, "
+                f"use_batchnorm={use_batchnorm}")
     model = PNASModel(input_length=args.input_length, use_batchnorm=use_batchnorm)
 
-    # ── Warm-start from checkpoint ────────────────────────────────────────────
     if args.checkpoint is not None:
         logger.info(f"Loading checkpoint: {args.checkpoint}")
         raw        = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
         state_dict = raw.get("model_state_dict", raw)
         model.load_partial_state_dict(state_dict)
     else:
-        logger.info("No checkpoint provided — training from random initialization.")
+        logger.info("No checkpoint — training from random initialization.")
 
-    # ── Train ─────────────────────────────────────────────────────────────────
     hparams = {
         "device":         device,
         "num_epochs":     args.epochs,
@@ -600,35 +540,34 @@ def main() -> None:
         "lr":             args.lr,
         "weight_decay":   args.weight_decay,
         "loss_fn":        kl_divergence_from_logits,
-        "uncertainty":    args.uncertainty,
-        "freeze_epochs":  args.freeze_epochs,
-        "lr_phase2":      args.lr_phase2 if args.lr_phase2 is not None else args.lr * 0.1,
         "l1_lambda":      args.l1_lambda,
         "l2_smooth":      args.l2_smooth,
-        "constant_var":   args.constant_var,
+        "stage1_epochs":  args.stage1_epochs,
+        "stage2_epochs":  args.stage2_epochs,
+        "stage3_epochs":  args.epochs,
     }
-    results = train(model, train_loader, val_loader, hparams)
 
-    # ── Optional test evaluation ──────────────────────────────────────────────
+    if args.staged:
+        results = train_staged(model, train_loader, val_loader, hparams)
+    else:
+        results = train(model, train_loader, val_loader, hparams)
+
     if args.test_npz is not None:
         logger.info(f"Loading test data: {args.test_npz}")
-        test_npz = np.load(args.test_npz)
+        test_npz     = np.load(args.test_npz)
         test_dataset = PSIDataset(
-            test_npz["seq_oh"],
-            test_npz["struct_oh"],
-            test_npz["wobbles"],
-            test_npz["metadata_PSI"].astype(np.float32),
+            test_npz["seq_oh"], test_npz["struct_oh"],
+            test_npz["wobbles"], test_npz["metadata_PSI"].astype(np.float32),
         )
-        test_loader = DataLoader(
-            test_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=pin,
-        )
-        logger.info(
-            f"  Test — examples: {len(test_dataset):,}, batches: {len(test_loader)}"
-        )
+        test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
+                                 shuffle=False, pin_memory=pin)
+        logger.info(f"  Test — examples: {len(test_dataset):,}")
 
-        logger.info(f"Reloading best checkpoint for test eval: {results['checkpoint_path']}")
-        best_ckpt = torch.load(results["checkpoint_path"], map_location=device, weights_only=False)
+        logger.info(f"Reloading best checkpoint: {results['checkpoint_path']}")
+        best_ckpt = torch.load(results["checkpoint_path"], map_location=device,
+                               weights_only=False)
         model.load_state_dict(best_ckpt["model_state_dict"])
+        model.stage = 3
         model = model.to(device)
 
         test_metrics = eval_epoch(model, test_loader, kl_divergence_from_logits, device)

@@ -281,6 +281,11 @@ class PNASModel(nn.Module):
         """
         super(PNASModel, self).__init__()
         self.input_length = input_length
+        # Training stage (1/2/3). Not an nn.Parameter — set externally by train_staged().
+        #   1: seq filters only, SumDiff+sigmoid (SimplifiedTuner)
+        #   2: seq+struct filters, SumDiff+sigmoid (SimplifiedTuner)
+        #   3: seq+struct filters, full ResidualTuner (normal inference)
+        self.stage = 3
 
         # In channels for sequence, structure, and wobble inputs.
         self.seq_in_channels = seq_in_channels
@@ -399,44 +404,45 @@ class PNASModel(nn.Module):
             where prediction is logits or PSI depending on ``return_logits``,
             and ``log_var``/``var`` each have shape ``(batch_size,)``.
         """
-        # Compute sequence activations - each is (batch_size, F_seq, 135)  [140 - 6 + 1]
-        conv_skip_out = self.conv_skip(x_seq) + self.position_bias_skip.unsqueeze(0)  # Add position bias
+        # ── Sequence activations (all stages) ────────────────────────────────
+        conv_skip_out = self.conv_skip(x_seq) + self.position_bias_skip.unsqueeze(0)
         conv_incl_out = self.conv_incl(x_seq) + self.position_bias_incl.unsqueeze(0)
-        
-        # Compute structure activations - each is (batch_size, F_struct, 140)  [same padding]
-        struct_input = torch.cat([x_seq, x_struct, x_wobble], dim=1)  # Concatenate along channel dimension
-        conv_struct_skip_out = self.conv_struct_skip(struct_input) + self.position_bias_skip_struct.unsqueeze(0)
-        conv_struct_incl_out = self.conv_struct_incl(struct_input) + self.position_bias_incl_struct.unsqueeze(0)
 
-        # Crop to match sequence activations (remove seq_kernel_size-1 = 5 positions: 2 left + 3 right)
-        conv_struct_skip_out = conv_struct_skip_out[:, :, 2:-3]
-        conv_struct_incl_out = conv_struct_incl_out[:, :, 2:-3]
-
-        # Concatenated activations
-        activations_skip = self.energy_activation_skip(torch.cat([conv_skip_out, conv_struct_skip_out], dim=1))  # (batch_size, F_seq + F_struct, L-5)
-        activations_incl = self.energy_activation_incl(torch.cat([conv_incl_out, conv_struct_incl_out], dim=1))  # (batch_size, F_seq + F_struct, L-5)
-
-        # Variance branch: global avg pool → linear bottleneck → VarianceTuner
-        if return_uncertainty:
-            h = torch.cat([activations_incl, activations_skip], dim=1)  # (N, 56, L-5)
-            h = h.mean(dim=2)                                            # (N, 56)
-            z = self.variance_bottleneck(h)                              # (N, 1) — linear, no activation
-            log_var, var = self.variance_tuner(z)                        # (N, 1) each
-
-        # Apply sum-difference
-        energy_in = torch.stack([activations_incl, activations_skip], dim=1)  # (batch_size, 2, F_seq + F_struct, L-5)
-        energy_out = self.energy_seq_struct(energy_in).unsqueeze(-1)  # (batch_size, 1)
-
-        tuner_out = self.tuner(energy_out)  # (batch_size, 1)
-
-        if return_logits:
-            pred = tuner_out.squeeze()
+        if self.stage == 1:
+            # Seq-only: bypass struct conv entirely so no gradient flows through it.
+            activations_skip = self.energy_activation_skip(conv_skip_out)  # (B, F_seq, L-5)
+            activations_incl = self.energy_activation_incl(conv_incl_out)
         else:
-            pred = self.output_activation(tuner_out).squeeze()
+            # ── Structure activations (stages 2 and 3) ───────────────────────
+            struct_input = torch.cat([x_seq, x_struct, x_wobble], dim=1)
+            conv_struct_skip_out = self.conv_struct_skip(struct_input) + self.position_bias_skip_struct.unsqueeze(0)
+            conv_struct_incl_out = self.conv_struct_incl(struct_input) + self.position_bias_incl_struct.unsqueeze(0)
+            # Crop to match seq length (seq kernel 6, valid padding → L-5)
+            conv_struct_skip_out = conv_struct_skip_out[:, :, 2:-3]
+            conv_struct_incl_out = conv_struct_incl_out[:, :, 2:-3]
+            activations_skip = self.energy_activation_skip(torch.cat([conv_skip_out, conv_struct_skip_out], dim=1))
+            activations_incl = self.energy_activation_incl(torch.cat([conv_incl_out, conv_struct_incl_out], dim=1))
+
+        # ── Variance branch (stage 3 only, when requested) ───────────────────
+        if return_uncertainty:
+            h = torch.cat([activations_incl, activations_skip], dim=1).mean(dim=2)
+            z = self.variance_bottleneck(h)
+            log_var, var = self.variance_tuner(z)
+
+        # ── SumDiff aggregation ───────────────────────────────────────────────
+        energy_in  = torch.stack([activations_incl, activations_skip], dim=1)
+        energy_out = self.energy_seq_struct(energy_in)  # (B,) — w*diff + b
+
+        # ── Output: simplified tuner (stages 1/2) or full ResidualTuner (stage 3)
+        if self.stage in (1, 2):
+            # SimplifiedTuner = SumDiff + sigmoid; energy_out is already w*diff+b
+            pred = energy_out if return_logits else torch.sigmoid(energy_out)
+        else:
+            tuner_out = self.tuner(energy_out.unsqueeze(-1))  # (B, 1)
+            pred = tuner_out.squeeze() if return_logits else self.output_activation(tuner_out).squeeze()
 
         if return_uncertainty:
             return pred, log_var.squeeze(), var.squeeze()
-
         return pred
 
     @torch.no_grad()
