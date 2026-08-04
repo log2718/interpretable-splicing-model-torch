@@ -81,18 +81,32 @@ def rmse(pred: torch.Tensor, target: torch.Tensor) -> float:
 
 # ── Per-epoch loops ───────────────────────────────────────────────────────────
 
+def _l2_smooth_loss(model: torch.nn.Module) -> torch.Tensor:
+    """L2 smoothness penalty on position bias weights.
+
+    Penalises squared first differences between adjacent positions, encouraging
+    the learned position bias to vary smoothly rather than spike.
+    Applies to all parameters whose name contains 'position_bias'.
+    """
+    loss = torch.tensor(0.0)
+    for name, p in model.named_parameters():
+        if "position_bias" in name and p.numel() > 1:
+            loss = loss + ((p[1:] - p[:-1]) ** 2).sum()
+    return loss
+
+
 def train_epoch(model, loader, optimizer, loss_fn, device,
                 uncertainty: bool = False, constant_var: bool = False,
-                l1_lambda: float = 0.0) -> dict:
+                l1_lambda: float = 0.0, l2_smooth: float = 0.0) -> dict:
     """One forward+backward pass over ``loader``. Returns loss, RMSE, and
     (when uncertainty=True) per-term NLL components and mean KL divergence.
 
-    l1_lambda: weight on L1 activity regularization applied to the post-softplus
-    filter activations (energy_activation_incl + energy_activation_skip).
-    Encourages sparse filter usage, producing cleaner identifiable motifs.
+    l1_lambda:  L1 activity regularization on post-softplus filter activations.
+    l2_smooth:  L2 smoothness regularization on position bias weights (squared
+                first differences between adjacent positions).
     """
     model.train()
-    total_loss = total_term1 = total_term2 = total_kl = total_l1 = 0.0
+    total_loss = total_term1 = total_term2 = total_kl = total_l1 = total_l2 = 0.0
     pred_list, target_list = [], []
 
     # Register hooks to capture post-softplus filter activations for L1 reg
@@ -139,6 +153,11 @@ def train_epoch(model, loader, optimizer, loss_fn, device,
                 loss   = loss + l1_reg
                 total_l1 += l1_reg.item() * y.size(0)
 
+            if l2_smooth > 0.0:
+                l2_reg = l2_smooth * _l2_smooth_loss(model)
+                loss   = loss + l2_reg
+                total_l2 += l2_reg.item() * y.size(0)
+
             loss.backward()
             optimizer.step()
 
@@ -161,6 +180,8 @@ def train_epoch(model, loader, optimizer, loss_fn, device,
         out["kl"]    = total_kl    / n
     if l1_lambda > 0.0:
         out["l1"] = total_l1 / n
+    if l2_smooth > 0.0:
+        out["l2"] = total_l2 / n
     return out
 
 
@@ -241,6 +262,7 @@ def train(model, train_loader, val_loader, hparams: dict) -> dict:
     freeze_epochs  = hparams.get("freeze_epochs", 0)
     constant_var   = hparams.get("constant_var", False)
     l1_lambda      = hparams.get("l1_lambda", 0.0)
+    l2_smooth      = hparams.get("l2_smooth", 0.0)
 
     model = model.to(device)
 
@@ -300,7 +322,7 @@ def train(model, train_loader, val_loader, hparams: dict) -> dict:
 
         train_metrics = train_epoch(model, train_loader, optimizer, loss_fn, device,
                                     uncertainty=uncertainty, constant_var=constant_var,
-                                    l1_lambda=l1_lambda)
+                                    l1_lambda=l1_lambda, l2_smooth=l2_smooth)
         val_metrics   = eval_epoch(model, val_loader, loss_fn, device,
                                    uncertainty=uncertainty, constant_var=constant_var)
 
@@ -460,6 +482,15 @@ def build_parser() -> argparse.ArgumentParser:
             "filters learn cleaner, identifiable motifs. Start with 1e-4 to 1e-3."
         ),
     )
+    unc.add_argument(
+        "--l2-smooth", type=float, default=0.0, dest="l2_smooth",
+        help=(
+            "Weight on L2 smoothness regularization applied to position bias weights. "
+            "Penalises squared first differences between adjacent positions, encouraging "
+            "smooth position bias curves. Used in the original PNAS paper alongside L1. "
+            "Start with 1e-4 to 1e-2."
+        ),
+    )
 
     run = parser.add_argument_group("runtime")
     run.add_argument(
@@ -573,6 +604,7 @@ def main() -> None:
         "freeze_epochs":  args.freeze_epochs,
         "lr_phase2":      args.lr_phase2 if args.lr_phase2 is not None else args.lr * 0.1,
         "l1_lambda":      args.l1_lambda,
+        "l2_smooth":      args.l2_smooth,
         "constant_var":   args.constant_var,
     }
     results = train(model, train_loader, val_loader, hparams)
