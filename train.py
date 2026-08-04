@@ -244,6 +244,11 @@ def train(model, train_loader, val_loader, hparams: dict) -> dict:
 
     model = model.to(device)
 
+    # Phase 1 is meaningless when variance is pinned to a constant (no gradient
+    # flows through the variance branch), so skip it.
+    if constant_var:
+        freeze_epochs = 0
+
     # Phase 1: freeze all params except the variance branch
     if uncertainty and freeze_epochs > 0:
         for name, p in model.named_parameters():
