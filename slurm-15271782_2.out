@@ -1,0 +1,7 @@
+Hostname: cs765.hpc.nyu.edu
+Starting at: Tue Aug  4 15:47:39 EDT 2026
+Array task: 2
+L1 lambda: 1e-1  checkpoint-dir: checkpoints/grid_l1_1e-1
+numpy 2.4.6
+torch 2.12.0+cu130
+Finished at: Tue Aug  4 16:08:38 EDT 2026

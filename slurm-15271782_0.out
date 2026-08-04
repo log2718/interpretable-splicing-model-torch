@@ -1,0 +1,7 @@
+Hostname: cs698.hpc.nyu.edu
+Starting at: Tue Aug  4 15:47:38 EDT 2026
+Array task: 0
+L1 lambda: 1e-2  checkpoint-dir: checkpoints/grid_l1_1e-2
+numpy 2.4.6
+torch 2.12.0+cu130
+Finished at: Tue Aug  4 16:15:15 EDT 2026
