@@ -58,6 +58,15 @@ def gaussian_nll_const_var(logits, targets):
     return 0.5 * F.mse_loss(logits, logit_true)
 
 
+def gaussian_nll_learned_var(logits, log_var, var, targets):
+    """Gaussian NLL in logit space with learned variance.
+
+    loss = 0.5 * (log_var + (logit_true - logit_pred)² / var)
+    """
+    logit_true = torch.logit(targets.clamp(1e-2, 1.0 - 1e-2))
+    return 0.5 * (log_var + (logit_true - logits) ** 2 / var).mean()
+
+
 def rmse(pred: torch.Tensor, target: torch.Tensor) -> float:
     return torch.sqrt(torch.mean((pred - target) ** 2)).item()
 
@@ -69,6 +78,19 @@ def _l2_smooth_loss(model: torch.nn.Module) -> torch.Tensor:
         if "position_bias" in name and p.numel() > 1:
             loss = loss + ((p[1:] - p[:-1]) ** 2).sum()
     return loss
+
+
+def _init_variance_to_one(model: torch.nn.Module) -> None:
+    """Set variance branch so initial σ² ≈ 1.
+
+    VarianceTuner: fc3 → softplus + 1e-6 = var. We want softplus(fc3.bias) ≈ 1,
+    i.e. fc3.bias = log(exp(1) - 1) ≈ 0.5413. Weights are left at their current
+    (random) values — they are small, so the bias dominates the initial output.
+    """
+    with torch.no_grad():
+        rho = torch.log(torch.exp(torch.tensor(1.0)) - 1.0).item()  # ≈ 0.5413
+        model.variance_tuner.fc3.bias.fill_(rho)
+    logger.info(f"  Variance init: fc3.bias set to {rho:.4f} → σ² ≈ 1")
 
 
 # ── Per-epoch loops ───────────────────────────────────────────────────────────
@@ -93,6 +115,8 @@ def train_epoch(model, loader, optimizer, loss_fn, device,
             lambda m, inp, out: _act.__setitem__(1, out)
         ))
 
+    stage_4 = getattr(model, "stage", 3) == 4
+
     try:
         pbar = tqdm(loader, desc="  train", leave=False, unit="batch")
         for seq, struct, wobble, y in pbar:
@@ -102,9 +126,15 @@ def train_epoch(model, loader, optimizer, loss_fn, device,
             y      = y.to(device, dtype=torch.float32, non_blocking=True)
 
             optimizer.zero_grad()
-            logits     = model(seq, struct, wobble, return_logits=True)
-            pred_probs = torch.sigmoid(logits)
-            loss       = loss_fn(logits, y)
+            if stage_4:
+                logits, log_var, var = model(seq, struct, wobble,
+                                             return_logits=True, return_uncertainty=True)
+                pred_probs = torch.sigmoid(logits)
+                loss       = gaussian_nll_learned_var(logits, log_var, var, y)
+            else:
+                logits     = model(seq, struct, wobble, return_logits=True)
+                pred_probs = torch.sigmoid(logits)
+                loss       = loss_fn(logits, y)
 
             if l1_lambda > 0.0:
                 # sum over (filters, positions) per example, then mean over batch
@@ -149,6 +179,8 @@ def eval_epoch(model, loader, loss_fn, device) -> dict:
     total_loss = 0.0
     pred_list, target_list = [], []
 
+    stage_4 = getattr(model, "stage", 3) == 4
+
     pbar = tqdm(loader, desc="  eval ", leave=False, unit="batch")
     with torch.no_grad():
         for seq, struct, wobble, y in pbar:
@@ -157,9 +189,15 @@ def eval_epoch(model, loader, loss_fn, device) -> dict:
             wobble = wobble.to(device, non_blocking=True)
             y      = y.to(device, dtype=torch.float32, non_blocking=True)
 
-            logits     = model(seq, struct, wobble, return_logits=True)
-            pred_probs = torch.sigmoid(logits)
-            loss       = loss_fn(logits, y)
+            if stage_4:
+                logits, log_var, var = model(seq, struct, wobble,
+                                             return_logits=True, return_uncertainty=True)
+                pred_probs = torch.sigmoid(logits)
+                loss       = gaussian_nll_learned_var(logits, log_var, var, y)
+            else:
+                logits     = model(seq, struct, wobble, return_logits=True)
+                pred_probs = torch.sigmoid(logits)
+                loss       = loss_fn(logits, y)
 
             total_loss += loss.item() * y.size(0)
             pred_list.append(pred_probs)
@@ -175,6 +213,7 @@ def eval_epoch(model, loader, loss_fn, device) -> dict:
 _STRUCT_PARAMS = {"conv_struct_incl", "conv_struct_skip",
                   "position_bias_incl_struct", "position_bias_skip_struct"}
 _TUNER_PARAMS  = {"tuner", "variance_bottleneck", "variance_tuner"}
+_VAR_PARAMS    = {"variance_bottleneck", "variance_tuner"}
 
 
 def _freeze_for_stage(model: torch.nn.Module, stage: int) -> None:
@@ -182,15 +221,20 @@ def _freeze_for_stage(model: torch.nn.Module, stage: int) -> None:
 
     Stage 1: only seq conv + seq position bias + SumDiff trainable.
     Stage 2: add struct conv + struct position bias.
-    Stage 3: everything except variance branch (which is not used here).
+    Stage 3: everything except variance branch.
+    Stage 4: variance branch only (filters frozen to preserve learned motifs).
     """
-    frozen_groups = _TUNER_PARAMS.copy()       # always freeze tuner in staged training
-    if stage == 1:
-        frozen_groups |= _STRUCT_PARAMS        # also freeze struct in stage 1
-
-    for name, p in model.named_parameters():
-        is_frozen = any(name.startswith(g) or g in name for g in frozen_groups)
-        p.requires_grad = not is_frozen
+    if stage == 4:
+        # Only variance_bottleneck and variance_tuner are trainable
+        for name, p in model.named_parameters():
+            p.requires_grad = any(g in name for g in _VAR_PARAMS)
+    else:
+        frozen_groups = _TUNER_PARAMS.copy()   # always freeze variance in stages 1-3
+        if stage == 1:
+            frozen_groups |= _STRUCT_PARAMS    # also freeze struct in stage 1
+        for name, p in model.named_parameters():
+            is_frozen = any(name.startswith(g) or g in name for g in frozen_groups)
+            p.requires_grad = not is_frozen
 
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
     n_total = sum(p.numel() for p in model.parameters())
@@ -284,16 +328,19 @@ def _train_one_stage(model, train_loader, val_loader, hparams: dict) -> dict:
 # ── Staged training (3-stage PNAS schedule) ───────────────────────────────────
 
 def train_staged(model, train_loader, val_loader, hparams: dict) -> dict:
-    """Three-stage training matching the original PNAS paper schedule.
+    """Three-stage (or four-stage) training matching the original PNAS paper schedule.
 
     Stage 1: seq filters + SumDiff only, struct/tuner frozen.
     Stage 2: seq + struct filters, tuner still frozen.
-    Stage 3: full model including ResidualTuner.
+    Stage 3: full model, variance branch frozen.
+    Stage 4 (optional): variance branch only; filters frozen; Gaussian NLL loss.
 
-    L1/L2 regularization is applied throughout all stages.
+    L1/L2 regularization is applied in stages 1-3.
     """
     device         = hparams["device"]
     checkpoint_dir = hparams["checkpoint_dir"]
+    stage4_epochs  = hparams.get("stage4_epochs", 0)
+    stage4_lr      = hparams.get("stage4_lr", hparams["lr"] * 0.1)
     stage_epochs   = [
         hparams.get("stage1_epochs", 50),
         hparams.get("stage2_epochs", 50),
@@ -317,7 +364,6 @@ def train_staged(model, train_loader, val_loader, hparams: dict) -> dict:
             logger.info(f"  Loading stage {stage-1} checkpoint: {prev_ckpt}")
             ckpt = torch.load(prev_ckpt, map_location=device, weights_only=False)
             model.load_state_dict(ckpt["model_state_dict"])
-            # Re-apply freeze after load_state_dict (it doesn't touch requires_grad)
             _freeze_for_stage(model, stage)
 
         stage_hparams = {
@@ -327,13 +373,40 @@ def train_staged(model, train_loader, val_loader, hparams: dict) -> dict:
         }
         results[stage] = _train_one_stage(model, train_loader, val_loader, stage_hparams)
 
-    # Reset to stage 3 for inference
-    model.stage = 3
+    # ── Stage 4: variance fine-tuning (optional) ──────────────────────────────
+    if stage4_epochs > 0:
+        logger.info(f"\n{'='*60}")
+        logger.info(f"=== STAGE 4 — {stage4_epochs} epochs (variance fine-tuning) ===")
+        logger.info(f"{'='*60}")
+
+        model.stage = 4
+        _freeze_for_stage(model, 4)
+
+        prev_ckpt = results[3]["checkpoint_path"]
+        logger.info(f"  Loading stage 3 checkpoint: {prev_ckpt}")
+        ckpt = torch.load(prev_ckpt, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model_state_dict"])
+        _freeze_for_stage(model, 4)
+
+        _init_variance_to_one(model)
+
+        stage4_hparams = {
+            **hparams,
+            "num_epochs":     stage4_epochs,
+            "lr":             stage4_lr,
+            "checkpoint_dir": os.path.join(checkpoint_dir, "stage4"),
+        }
+        results[4] = _train_one_stage(model, train_loader, val_loader, stage4_hparams)
+
+    final_stage = 4 if stage4_epochs > 0 else 3
+    model.stage = final_stage
     logger.info("\n=== Staged training complete ===")
     logger.info(f"  Stage 1 best val loss: {results[1]['best_val_loss']:.6f}")
     logger.info(f"  Stage 2 best val loss: {results[2]['best_val_loss']:.6f}")
     logger.info(f"  Stage 3 best val loss: {results[3]['best_val_loss']:.6f}")
-    return results[3]
+    if stage4_epochs > 0:
+        logger.info(f"  Stage 4 best val loss: {results[4]['best_val_loss']:.6f}")
+    return results[final_stage]
 
 
 # ── Non-staged training loop (unchanged from Arush's version) ────────────────
@@ -475,6 +548,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Epochs for stage 1 (seq only, simplified tuner).")
     stg.add_argument("--stage2-epochs", type=int, default=50, dest="stage2_epochs",
                      help="Epochs for stage 2 (seq+struct, simplified tuner).")
+    stg.add_argument("--stage4-epochs", type=int, default=0, dest="stage4_epochs",
+                     help="Epochs for stage 4 (variance fine-tuning). 0 = skip stage 4.")
+    stg.add_argument("--stage4-lr",     type=float, default=None, dest="stage4_lr",
+                     help="LR for stage 4 (default: 0.1 × --lr).")
 
     run = parser.add_argument_group("runtime")
     run.add_argument("--checkpoint-dir", default="./checkpoints")
@@ -567,6 +644,8 @@ def main() -> None:
         "stage1_epochs":  args.stage1_epochs,
         "stage2_epochs":  args.stage2_epochs,
         "stage3_epochs":  args.epochs,
+        "stage4_epochs":  args.stage4_epochs,
+        "stage4_lr":      args.stage4_lr if args.stage4_lr is not None else args.lr * 0.1,
     }
 
     if args.staged:
