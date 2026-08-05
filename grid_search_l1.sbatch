@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=grid_l1
 #SBATCH --account=torch_pr_352_general
-#SBATCH --array=0-2
+#SBATCH --array=0-3
 
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
@@ -21,7 +21,7 @@ cd /scratch/yl12316/interpretable-splicing-model-torch
 # L1 values to sweep with corrected sum-based formulation; L2 fixed at 1e-3
 # Effective strength ~1700x old formulation, so old 0.1 ≈ new 6e-5.
 # Grid centered just above that: 1e-4, 5e-4, 2e-3.
-L1_VALUES=(1e-4 5e-4 2e-3)
+L1_VALUES=(1e-4 5e-4 2e-3 1e-2)
 L1=${L1_VALUES[$SLURM_ARRAY_TASK_ID]}
 OUTDIR="checkpoints/grid_l1_${L1}"
 
