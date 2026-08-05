@@ -54,7 +54,7 @@ def gaussian_nll_const_var(logits, targets):
 
     PSI targets are clipped away from 0/1 before logit transform to avoid ±inf.
     """
-    logit_true = torch.logit(targets.clamp(1e-6, 1.0 - 1e-6))
+    logit_true = torch.logit(targets.clamp(1e-2, 1.0 - 1e-2))
     return 0.5 * F.mse_loss(logits, logit_true)
 
 

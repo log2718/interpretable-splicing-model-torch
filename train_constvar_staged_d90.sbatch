@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=constvar_staged
 #SBATCH --account=torch_pr_352_general
-#SBATCH --array=0-1
+#SBATCH --array=0-2
 
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
@@ -19,7 +19,7 @@ echo "Array task: ${SLURM_ARRAY_TASK_ID}"
 cd /scratch/yl12316/interpretable-splicing-model-torch
 
 # Two lambdas recommended as first sweep for constant-var model
-L1_VALUES=(5e-4 2e-3)
+L1_VALUES=(5e-4 2e-3 1e-2)
 L1=${L1_VALUES[$SLURM_ARRAY_TASK_ID]}
 OUTDIR="checkpoints/constvar_staged_d90_l1_${L1}"
 
