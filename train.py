@@ -115,7 +115,7 @@ def train_epoch(model, loader, optimizer, loss_fn, device,
             lambda m, inp, out: _act.__setitem__(1, out)
         ))
 
-    stage_4 = getattr(model, "stage", 3) == 4
+    stage_4_plus = getattr(model, "stage", 3) >= 4
 
     try:
         pbar = tqdm(loader, desc="  train", leave=False, unit="batch")
@@ -126,7 +126,7 @@ def train_epoch(model, loader, optimizer, loss_fn, device,
             y      = y.to(device, dtype=torch.float32, non_blocking=True)
 
             optimizer.zero_grad()
-            if stage_4:
+            if stage_4_plus:
                 logits, log_var, var = model(seq, struct, wobble,
                                              return_logits=True, return_uncertainty=True)
                 pred_probs = torch.sigmoid(logits)
@@ -179,7 +179,7 @@ def eval_epoch(model, loader, loss_fn, device) -> dict:
     total_loss = 0.0
     pred_list, target_list = [], []
 
-    stage_4 = getattr(model, "stage", 3) == 4
+    stage_4_plus = getattr(model, "stage", 3) >= 4
 
     pbar = tqdm(loader, desc="  eval ", leave=False, unit="batch")
     with torch.no_grad():
@@ -189,7 +189,7 @@ def eval_epoch(model, loader, loss_fn, device) -> dict:
             wobble = wobble.to(device, non_blocking=True)
             y      = y.to(device, dtype=torch.float32, non_blocking=True)
 
-            if stage_4:
+            if stage_4_plus:
                 logits, log_var, var = model(seq, struct, wobble,
                                              return_logits=True, return_uncertainty=True)
                 pred_probs = torch.sigmoid(logits)
@@ -224,7 +224,11 @@ def _freeze_for_stage(model: torch.nn.Module, stage: int) -> None:
     Stage 3: everything except variance branch.
     Stage 4: variance branch only (filters frozen to preserve learned motifs).
     """
-    if stage == 4:
+    if stage == 5:
+        # Everything unfrozen — full joint fine-tuning
+        for p in model.parameters():
+            p.requires_grad = True
+    elif stage == 4:
         # Only variance_bottleneck and variance_tuner are trainable
         for name, p in model.named_parameters():
             p.requires_grad = any(g in name for g in _VAR_PARAMS)
@@ -398,14 +402,43 @@ def train_staged(model, train_loader, val_loader, hparams: dict) -> dict:
         }
         results[4] = _train_one_stage(model, train_loader, val_loader, stage4_hparams)
 
-    final_stage = 4 if stage4_epochs > 0 else 3
+    # ── Stage 5: full joint fine-tuning (optional) ───────────────────────────
+    stage5_epochs  = hparams.get("stage5_epochs", 0)
+    stage5_lr      = hparams.get("stage5_lr", stage4_lr)
+    stage5_patience = hparams.get("stage5_patience", 10)
+
+    if stage5_epochs > 0:
+        if stage4_epochs == 0:
+            raise ValueError("Stage 5 requires stage 4 to have run (stage4_epochs must be > 0).")
+
+        logger.info(f"\n{'='*60}")
+        logger.info(f"=== STAGE 5 — {stage5_epochs} epochs (full joint fine-tuning) ===")
+        logger.info(f"{'='*60}")
+
+        model.stage = 5
+        _freeze_for_stage(model, 5)
+
+        prev_ckpt = results[4]["checkpoint_path"]
+        logger.info(f"  Loading stage 4 checkpoint: {prev_ckpt}")
+        ckpt = torch.load(prev_ckpt, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model_state_dict"])
+        _freeze_for_stage(model, 5)
+
+        stage5_hparams = {
+            **hparams,
+            "num_epochs":     stage5_epochs,
+            "lr":             stage5_lr,
+            "patience":       stage5_patience,
+            "checkpoint_dir": os.path.join(checkpoint_dir, "stage5"),
+        }
+        results[5] = _train_one_stage(model, train_loader, val_loader, stage5_hparams)
+
+    final_stage = 5 if stage5_epochs > 0 else (4 if stage4_epochs > 0 else 3)
     model.stage = final_stage
     logger.info("\n=== Staged training complete ===")
-    logger.info(f"  Stage 1 best val loss: {results[1]['best_val_loss']:.6f}")
-    logger.info(f"  Stage 2 best val loss: {results[2]['best_val_loss']:.6f}")
-    logger.info(f"  Stage 3 best val loss: {results[3]['best_val_loss']:.6f}")
-    if stage4_epochs > 0:
-        logger.info(f"  Stage 4 best val loss: {results[4]['best_val_loss']:.6f}")
+    for s in [1, 2, 3, 4, 5]:
+        if s in results:
+            logger.info(f"  Stage {s} best val loss: {results[s]['best_val_loss']:.6f}")
     return results[final_stage]
 
 
@@ -552,6 +585,14 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Epochs for stage 4 (variance fine-tuning). 0 = skip stage 4.")
     stg.add_argument("--stage4-lr",     type=float, default=None, dest="stage4_lr",
                      help="LR for stage 4 (default: 0.1 × --lr).")
+    stg.add_argument("--stage5-epochs", type=int,   default=0,    dest="stage5_epochs",
+                     help="Epochs for stage 5 (full joint fine-tuning). 0 = skip stage 5.")
+    stg.add_argument("--stage5-lr",     type=float, default=None, dest="stage5_lr",
+                     help="LR for stage 5 (default: same as stage 4 LR).")
+    stg.add_argument("--stage5-patience", type=int, default=10,   dest="stage5_patience",
+                     help="Early-stopping patience for stage 5.")
+    stg.add_argument("--stage5-checkpoint", default=None, dest="stage5_checkpoint", metavar="PATH",
+                     help="Skip stages 1-4 and resume directly from this stage-4 checkpoint for stage 5.")
 
     run = parser.add_argument_group("runtime")
     run.add_argument("--checkpoint-dir", default="./checkpoints")
@@ -644,11 +685,31 @@ def main() -> None:
         "stage1_epochs":  args.stage1_epochs,
         "stage2_epochs":  args.stage2_epochs,
         "stage3_epochs":  args.epochs,
-        "stage4_epochs": args.stage4_epochs,
-        "stage4_lr":     args.stage4_lr if args.stage4_lr is not None else args.lr * 0.1,
+        "stage4_epochs":    args.stage4_epochs,
+        "stage4_lr":        args.stage4_lr if args.stage4_lr is not None else args.lr * 0.1,
+        "stage5_epochs":    args.stage5_epochs,
+        "stage5_lr":        args.stage5_lr if args.stage5_lr is not None else
+                            (args.stage4_lr if args.stage4_lr is not None else args.lr * 0.1),
+        "stage5_patience":  args.stage5_patience,
     }
 
-    if args.staged:
+    if args.stage5_checkpoint is not None:
+        # Resume directly from an existing stage-4 checkpoint → run stage 5 only
+        logger.info(f"Resuming from stage-4 checkpoint for stage 5: {args.stage5_checkpoint}")
+        raw = torch.load(args.stage5_checkpoint, map_location="cpu", weights_only=False)
+        model.load_partial_state_dict(raw.get("model_state_dict", raw))
+        model = model.to(device)
+        model.stage = 5
+        _freeze_for_stage(model, 5)
+        stage5_hparams = {
+            **hparams,
+            "num_epochs": hparams["stage5_epochs"] if hparams["stage5_epochs"] > 0 else 100,
+            "lr":         hparams["stage5_lr"],
+            "patience":   hparams["stage5_patience"],
+            "checkpoint_dir": os.path.join(hparams["checkpoint_dir"], "stage5"),
+        }
+        results = _train_one_stage(model, train_loader, val_loader, stage5_hparams)
+    elif args.staged:
         results = train_staged(model, train_loader, val_loader, hparams)
     else:
         results = train(model, train_loader, val_loader, hparams)
