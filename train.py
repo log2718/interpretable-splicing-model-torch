@@ -49,6 +49,15 @@ def kl_divergence_from_logits(logits, targets):
     )
 
 
+def gaussian_nll_const_var(logits, targets):
+    """Gaussian NLL in logit space with var fixed to 1: 0.5 * MSE(logit_pred, logit_true).
+
+    PSI targets are clipped away from 0/1 before logit transform to avoid ±inf.
+    """
+    logit_true = torch.logit(targets.clamp(1e-6, 1.0 - 1e-6))
+    return 0.5 * F.mse_loss(logits, logit_true)
+
+
 def rmse(pred: torch.Tensor, target: torch.Tensor) -> float:
     return torch.sqrt(torch.mean((pred - target) ** 2)).item()
 
@@ -456,6 +465,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="L1 activity regularization on post-softplus filter activations.")
     opt.add_argument("--l2-smooth",    type=float, default=0.0, dest="l2_smooth",
                      help="L2 smoothness regularization on position bias weights.")
+    opt.add_argument("--constant-var", action="store_true", dest="constant_var",
+                     help="Use logit-space MSE loss (Gaussian NLL, var=1) instead of KL divergence.")
 
     stg = parser.add_argument_group("staged training")
     stg.add_argument("--staged", action="store_true",
@@ -537,6 +548,12 @@ def main() -> None:
     else:
         logger.info("No checkpoint — training from random initialization.")
 
+    loss_fn = gaussian_nll_const_var if args.constant_var else kl_divergence_from_logits
+    if args.constant_var:
+        logger.info("Loss: Gaussian NLL with var=1 (logit-space MSE)")
+    else:
+        logger.info("Loss: KL divergence (Bernoulli)")
+
     hparams = {
         "device":         device,
         "num_epochs":     args.epochs,
@@ -544,7 +561,7 @@ def main() -> None:
         "checkpoint_dir": args.checkpoint_dir,
         "lr":             args.lr,
         "weight_decay":   args.weight_decay,
-        "loss_fn":        kl_divergence_from_logits,
+        "loss_fn":        loss_fn,
         "l1_lambda":      args.l1_lambda,
         "l2_smooth":      args.l2_smooth,
         "stage1_epochs":  args.stage1_epochs,
