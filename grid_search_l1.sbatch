@@ -18,8 +18,10 @@ echo "Array task: ${SLURM_ARRAY_TASK_ID}"
 
 cd /scratch/yl12316/interpretable-splicing-model-torch
 
-# L1 values to sweep; L2 fixed at 1e-3 (position bias smoothness)
-L1_VALUES=(1e-2 5e-2 1e-1)
+# L1 values to sweep with corrected sum-based formulation; L2 fixed at 1e-3
+# Effective strength ~1700x old formulation, so old 0.1 ≈ new 6e-5.
+# Grid centered just above that: 1e-4, 5e-4, 2e-3.
+L1_VALUES=(1e-4 5e-4 2e-3)
 L1=${L1_VALUES[$SLURM_ARRAY_TASK_ID]}
 OUTDIR="checkpoints/grid_l1_${L1}"
 
@@ -37,11 +39,14 @@ singularity exec --nv \
 
     python train.py \
       --train-npz data/train_data.npz \
-      --test-npz data/test_data.npz \
+      --test-npz  data/test_data.npz \
       --input-length 90 \
       --checkpoint-dir ${OUTDIR} \
-      --epochs 200 \
-      --patience 20 \
+      --staged \
+      --stage1-epochs 50 \
+      --stage2-epochs 50 \
+      --epochs 100 \
+      --patience 15 \
       --batch-size 256 \
       --lr 1e-3 \
       --seed 42 \

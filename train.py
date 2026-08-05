@@ -98,7 +98,12 @@ def train_epoch(model, loader, optimizer, loss_fn, device,
             loss       = loss_fn(logits, y)
 
             if l1_lambda > 0.0:
-                l1_reg   = l1_lambda * (_act[0].mean() + _act[1].mean())
+                # sum over (filters, positions) per example, then mean over batch
+                # — keeps gradient per activation at 1/B rather than 1/(B*F*P)
+                l1_reg   = l1_lambda * (
+                    _act[0].sum(dim=(1, 2)).mean() +
+                    _act[1].sum(dim=(1, 2)).mean()
+                )
                 loss     = loss + l1_reg
                 total_l1 += l1_reg.item() * y.size(0)
 

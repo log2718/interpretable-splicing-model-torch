@@ -40,7 +40,7 @@ singularity exec --nv \
       --lr 1e-3 \
       --seed 42 \
       --no-batchnorm \
-      --l1-lambda 1e-1 \
+      --l1-lambda 1e-4 \
       --l2-smooth 1e-3
   "
 
