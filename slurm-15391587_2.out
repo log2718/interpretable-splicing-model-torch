@@ -1,0 +1,7 @@
+Hostname: cs694.hpc.nyu.edu
+Starting at: Wed Aug  5 14:39:50 EDT 2026
+Array task: 2
+L1 lambda: 2e-2  stage4 ckpt: checkpoints/staged4_d90_l1_2e-2/stage4/best_model_20260805_125753.pt
+numpy 2.4.6
+torch 2.12.0+cu130
+Finished at: Wed Aug  5 14:58:22 EDT 2026
