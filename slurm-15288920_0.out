@@ -1,0 +1,7 @@
+Hostname: cs603.hpc.nyu.edu
+Starting at: Wed Aug  5 00:33:26 EDT 2026
+Array task: 0
+L1 lambda: 5e-4  checkpoint-dir: checkpoints/constvar_staged_d90_l1_5e-4
+numpy 2.4.6
+torch 2.12.0+cu130
+Finished at: Wed Aug  5 00:52:12 EDT 2026
