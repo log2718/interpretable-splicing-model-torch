@@ -46,7 +46,6 @@ singularity exec --nv \
       --stage2-epochs 50 \
       --epochs 100 \
       --stage4-epochs 100 \
-      --stage4-patience 10 \
       --patience 15 \
       --batch-size 256 \
       --lr 1e-3 \
