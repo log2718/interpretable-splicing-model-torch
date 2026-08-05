@@ -1,0 +1,7 @@
+Hostname: cs615.hpc.nyu.edu
+Starting at: Tue Aug  4 21:22:51 EDT 2026
+Array task: 1
+L1 lambda: 5e-4  checkpoint-dir: checkpoints/grid_l1_5e-4
+numpy 2.4.6
+torch 2.12.0+cu130
+Finished at: Tue Aug  4 21:41:53 EDT 2026
