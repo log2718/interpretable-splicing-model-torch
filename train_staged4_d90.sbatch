@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=staged4_d90
 #SBATCH --account=torch_pr_352_general
-#SBATCH --array=0-1
+#SBATCH --array=0-2
 
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
@@ -20,7 +20,7 @@ cd /scratch/yl12316/interpretable-splicing-model-torch
 
 # Stages 1-3: constvar loss; Stage 4: learned-variance Gaussian NLL.
 # Lambda grid: 2e-3 and 1e-2 — the two closest to PNAS sparsity in constvar runs.
-L1_VALUES=(2e-3 1e-2)
+L1_VALUES=(2e-3 1e-2 2e-2)
 L1=${L1_VALUES[$SLURM_ARRAY_TASK_ID]}
 OUTDIR="checkpoints/staged4_d90_l1_${L1}"
 
@@ -45,7 +45,8 @@ singularity exec --nv \
       --stage1-epochs 50 \
       --stage2-epochs 50 \
       --epochs 100 \
-      --stage4-epochs 50 \
+      --stage4-epochs 100 \
+      --stage4-patience 10 \
       --patience 15 \
       --batch-size 256 \
       --lr 1e-3 \

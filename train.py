@@ -394,6 +394,7 @@ def train_staged(model, train_loader, val_loader, hparams: dict) -> dict:
             **hparams,
             "num_epochs":     stage4_epochs,
             "lr":             stage4_lr,
+            "patience":       hparams.get("stage4_patience", 10),
             "checkpoint_dir": os.path.join(checkpoint_dir, "stage4"),
         }
         results[4] = _train_one_stage(model, train_loader, val_loader, stage4_hparams)
@@ -548,10 +549,12 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Epochs for stage 1 (seq only, simplified tuner).")
     stg.add_argument("--stage2-epochs", type=int, default=50, dest="stage2_epochs",
                      help="Epochs for stage 2 (seq+struct, simplified tuner).")
-    stg.add_argument("--stage4-epochs", type=int, default=0, dest="stage4_epochs",
+    stg.add_argument("--stage4-epochs",  type=int,   default=0,    dest="stage4_epochs",
                      help="Epochs for stage 4 (variance fine-tuning). 0 = skip stage 4.")
-    stg.add_argument("--stage4-lr",     type=float, default=None, dest="stage4_lr",
+    stg.add_argument("--stage4-lr",      type=float, default=None, dest="stage4_lr",
                      help="LR for stage 4 (default: 0.1 × --lr).")
+    stg.add_argument("--stage4-patience", type=int,  default=10,   dest="stage4_patience",
+                     help="Early-stopping patience for stage 4.")
 
     run = parser.add_argument_group("runtime")
     run.add_argument("--checkpoint-dir", default="./checkpoints")
@@ -644,8 +647,9 @@ def main() -> None:
         "stage1_epochs":  args.stage1_epochs,
         "stage2_epochs":  args.stage2_epochs,
         "stage3_epochs":  args.epochs,
-        "stage4_epochs":  args.stage4_epochs,
-        "stage4_lr":      args.stage4_lr if args.stage4_lr is not None else args.lr * 0.1,
+        "stage4_epochs":   args.stage4_epochs,
+        "stage4_lr":       args.stage4_lr if args.stage4_lr is not None else args.lr * 0.1,
+        "stage4_patience": args.stage4_patience,
     }
 
     if args.staged:
