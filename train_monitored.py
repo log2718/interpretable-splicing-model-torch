@@ -321,10 +321,6 @@ def main():
         "--csv-log", default="training_metrics.csv", dest="csv_log",
         help="Path to per-epoch CSV log file.",
     )
-    parser.add_argument(
-        "--test-npz", default=None, dest="test_npz",
-        help="Held-out test set for per-epoch evaluation.",
-    )
     args = parser.parse_args()
 
     logging.basicConfig(
