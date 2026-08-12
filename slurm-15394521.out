@@ -1,0 +1,19 @@
+Hostname: cs604.hpc.nyu.edu
+Starting at: Wed Aug  5 15:10:57 EDT 2026
+Exon portion : whole
+Chunks       :
+  up_1_10         (10 nt)  CATCCAGGTT
+  up_11_20        (10 nt)  CTTTCTCTGC
+  ds_1_10         (10 nt)  CAGGTCTGAC
+  ds_11_20        (10 nt)  TATGGGACCC
+
+Loaded 47,962 exons
+Temperature: 37.0°C   Workers: 16
+Total RNAduplex calls: 191,848
+
+Saved data/test_rnaduplex_finegrained_10nt.csv  (47,962 rows, 9 cols)
+  mfe_up_1_10: mean=-5.77  min=-16.70  bottom2%=-10.50
+  mfe_up_11_20: mean=-4.59  min=-15.40  bottom2%=-9.40
+  mfe_ds_1_10: mean=-7.36  min=-17.50  bottom2%=-11.70
+  mfe_ds_11_20: mean=-7.58  min=-18.10  bottom2%=-12.40
+Finished at: Wed Aug  5 15:12:22 EDT 2026

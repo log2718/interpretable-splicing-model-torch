@@ -1,0 +1,51 @@
+++ hostname
++ echo 'Hostname: cs622.hpc.nyu.edu'
+++ date
++ echo 'Starting at: Tue Aug 11 20:17:36 EDT 2026'
++ echo 'Array task: 0'
++ cd /scratch/yl12316/interpretable-splicing-model-torch
++ SEEDS=(42 142 242)
++ SEED=42
++ OUTDIR=checkpoints/monitored_seed42
++ CSVLOG=logs/metrics_seed42.csv
++ mkdir -p logs
++ echo 'Seed: 42  checkpoint-dir: checkpoints/monitored_seed42  csv: logs/metrics_seed42.csv'
++ singularity exec --nv --overlay /scratch/yl12316/my_project/overlay-15GB-500K.ext3:ro /share/apps/images/cuda13.0.1-cudnn9.13.0-ubuntu-24.04.3.sif /bin/bash -c '
+    source /ext3/env.sh
+
+    python -c '\''import numpy, torch; print("numpy", numpy.__version__); print("torch", torch.__version__)'\''
+
+    cd /scratch/yl12316/interpretable-splicing-model-torch
+
+    python train_monitored.py       --train-npz    data/train_data.npz       --test-npz     data/test_data.npz       --input-length 90       --checkpoint-dir checkpoints/monitored_seed42       --csv-log        logs/metrics_seed42.csv       --staged       --stage1-epochs  50       --stage2-epochs  50       --epochs         100       --stage4-epochs  100       --stage5-epochs  100       --patience       15       --stage4-lr      1e-4       --stage5-lr      1e-4       --stage5-patience 10       --batch-size     256       --lr             1e-3       --seed           42       --no-batchnorm       --constant-var       --l1-lambda      2e-3       --l2-smooth      1e-3
+  '
+Traceback (most recent call last):
+  File "/scratch/yl12316/interpretable-splicing-model-torch/train_monitored.py", line 430, in <module>
+    main()
+    ~~~~^^
+  File "/scratch/yl12316/interpretable-splicing-model-torch/train_monitored.py", line 324, in main
+    parser.add_argument(
+    ~~~~~~~~~~~~~~~~~~~^
+        "--test-npz", default=None, dest="test_npz",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        help="Held-out test set for per-epoch evaluation.",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/ext3/miniforge3/lib/python3.13/argparse.py", line 1517, in add_argument
+    return self._add_action(action)
+           ~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/ext3/miniforge3/lib/python3.13/argparse.py", line 1906, in _add_action
+    self._optionals._add_action(action)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/ext3/miniforge3/lib/python3.13/argparse.py", line 1724, in _add_action
+    action = super(_ArgumentGroup, self)._add_action(action)
+  File "/ext3/miniforge3/lib/python3.13/argparse.py", line 1531, in _add_action
+    self._check_conflict(action)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/ext3/miniforge3/lib/python3.13/argparse.py", line 1673, in _check_conflict
+    conflict_handler(action, confl_optionals)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/ext3/miniforge3/lib/python3.13/argparse.py", line 1682, in _handle_conflict_error
+    raise ArgumentError(action, message % conflict_string)
+argparse.ArgumentError: argument --test-npz: conflicting option string: --test-npz

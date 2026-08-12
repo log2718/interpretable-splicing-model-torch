@@ -1,0 +1,6 @@
+Hostname: cs635.hpc.nyu.edu
+Starting at: Tue Aug 11 20:17:37 EDT 2026
+Array task: 2
+Seed: 242  checkpoint-dir: checkpoints/monitored_seed242  csv: logs/metrics_seed242.csv
+numpy 2.4.6
+torch 2.12.0+cu130
