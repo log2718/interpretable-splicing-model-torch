@@ -1,0 +1,7 @@
+Hostname: cs622.hpc.nyu.edu
+Starting at: Wed Aug 12 00:35:16 EDT 2026
+Array task: 0
+Seed: 42  checkpoint-dir: checkpoints/monitored_seed42  csv: logs/metrics_seed42.csv
+numpy 2.4.6
+torch 2.12.0+cu130
+Finished at: Wed Aug 12 01:02:45 EDT 2026
