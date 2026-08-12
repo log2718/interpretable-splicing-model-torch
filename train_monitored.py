@@ -212,6 +212,7 @@ def train_staged_monitored(
     checkpoint_dir = hparams["checkpoint_dir"]
     stage4_epochs  = hparams.get("stage4_epochs", 0)
     stage4_lr      = hparams.get("stage4_lr", hparams["lr"] * 0.1)
+    start_stage    = hparams.get("start_stage", 1)
     stage_epochs   = [
         hparams.get("stage1_epochs", 50),
         hparams.get("stage2_epochs", 50),
@@ -221,7 +222,22 @@ def train_staged_monitored(
     model = model.to(device)
     results = {}
 
+    # When resuming from stage 4+, load existing stage 3 checkpoint
+    if start_stage >= 4:
+        import glob as _glob
+        stage3_dir  = os.path.join(checkpoint_dir, "stage3")
+        stage3_ckpts = sorted(_glob.glob(os.path.join(stage3_dir, "best_model_*.pt")))
+        if not stage3_ckpts:
+            raise FileNotFoundError(f"No stage3 checkpoint found in {stage3_dir}")
+        stage3_ckpt = stage3_ckpts[-1]
+        logger.info(f"Resuming from stage 3 checkpoint: {stage3_ckpt}")
+        ckpt = torch.load(stage3_ckpt, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model_state_dict"])
+        results[3] = {"checkpoint_path": stage3_ckpt}
+
     for stage in [1, 2, 3]:
+        if stage < start_stage:
+            continue
         logger.info(f"\n{'='*60}")
         logger.info(f"=== STAGE {stage} — {stage_epochs[stage-1]} epochs ===")
         logger.info(f"{'='*60}")
@@ -321,6 +337,10 @@ def main():
         "--csv-log", default="training_metrics.csv", dest="csv_log",
         help="Path to per-epoch CSV log file.",
     )
+    parser.add_argument(
+        "--start-stage", type=int, default=1, dest="start_stage",
+        help="Stage to start from (1=full run; 4=resume from existing stage3 checkpoint).",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -397,6 +417,7 @@ def main():
         "stage5_lr":        args.stage5_lr if args.stage5_lr is not None else
                             (args.stage4_lr if args.stage4_lr is not None else args.lr * 0.1),
         "stage5_patience":  args.stage5_patience,
+        "start_stage":      args.start_stage,
     }
 
     # ── CSV setup ─────────────────────────────────────────────────────────────
@@ -404,9 +425,11 @@ def main():
                   "val_kl", "val_mse", "test_kl", "test_mse",
                   "sumdiff_w", "sumdiff_b"]
     os.makedirs(os.path.dirname(os.path.abspath(args.csv_log)), exist_ok=True)
-    csv_fh = open(args.csv_log, "w", newline="")
+    csv_mode = "a" if args.start_stage > 1 else "w"
+    csv_fh = open(args.csv_log, csv_mode, newline="")
     csv_writer = csv.DictWriter(csv_fh, fieldnames=csv_fields)
-    csv_writer.writeheader()
+    if csv_mode == "w":
+        csv_writer.writeheader()
     csv_fh.flush()
 
     logger.info(f"CSV log → {args.csv_log}")
